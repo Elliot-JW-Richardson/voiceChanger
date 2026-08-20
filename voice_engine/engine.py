@@ -11,9 +11,16 @@ slices add concrete step types; each step is expected to be a callable
 that takes a block and returns the processed block, so the loop below is
 already correct for non-empty chains without further changes.
 """
+from collections.abc import Callable
+
+import numpy as np
+from numpy.typing import NDArray
+
+AudioBlock = NDArray[np.float32]
+EffectStep = Callable[[AudioBlock], AudioBlock]
 
 
-def ProcessChain(steps, block):
+def ProcessChain(steps: list[EffectStep], block: AudioBlock) -> AudioBlock:
     """Apply an ordered list of Effect Steps to a block of audio.
 
     steps: ordered list of Effect Steps. Each step must be callable,
