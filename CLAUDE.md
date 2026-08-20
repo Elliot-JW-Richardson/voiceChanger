@@ -29,7 +29,24 @@ For a bare CLI passthrough test without the web server/UI:
 python main.py
 ```
 
-There is no test suite, linter, or build step in this repo currently.
+Tests use `pytest` (installed into `venv`, not in `requirements.txt` yet):
+
+```
+venv\Scripts\python.exe -m pytest
+```
+
+There is no linter or build step in this repo currently.
+
+## Code style
+
+Deliberate deviation from PEP 8, established starting with the Slice 1 implementation:
+
+- **Variables**: `camelCase` (e.g. `activeVoice`, `sampleRate`)
+- **Functions and classes**: `PascalCase` (e.g. `def ProcessChain(...)`, `class VoiceBank`)
+- **Global (module-level) variables**: `SCREAMING_SNAKE_CASE` (e.g. `SAMPLE_RATE`, `ACTIVE_VOICE`)
+- **Exception**: pytest test functions keep the `test_` lowercase-snake-case prefix pytest's default discovery requires (e.g. `def test_empty_chain_returns_block_unchanged():`) — this is a framework constraint, not a style choice.
+
+`app.py` and `main.py` predate this convention and still use standard Python snake_case; they'll be brought into compliance as upcoming slices touch them (the audio callback rewrite in Slice 6, the pitch-endpoint removal in Slice 9), not retrofitted wholesale.
 
 ## Architecture notes
 

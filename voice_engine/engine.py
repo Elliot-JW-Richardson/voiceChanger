@@ -13,7 +13,7 @@ already correct for non-empty chains without further changes.
 """
 
 
-def process_chain(steps, block):
+def ProcessChain(steps, block):
     """Apply an ordered list of Effect Steps to a block of audio.
 
     steps: ordered list of Effect Steps. Each step must be callable,

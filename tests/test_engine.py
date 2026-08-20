@@ -7,7 +7,7 @@ Verification (from SLICES.md, Slice 1):
 """
 import numpy as np
 
-from voice_engine.engine import process_chain
+from voice_engine.engine import ProcessChain
 
 
 def test_empty_chain_returns_block_unchanged():
@@ -17,7 +17,7 @@ def test_empty_chain_returns_block_unchanged():
     block = rng.uniform(-1.0, 1.0, size=(1024, 1)).astype(np.float32)
     original = block.copy()
 
-    result = process_chain([], block)
+    result = ProcessChain([], block)
 
     assert result.dtype == np.float32
     assert result.shape == block.shape
