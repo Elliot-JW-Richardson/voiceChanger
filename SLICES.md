@@ -19,7 +19,7 @@
 
 **Completion promise:** `SLICE_1_DONE`
 **Depends on:** none
-**Status:** todo
+**Status:** done
 
 ## Slice 2 — Voice loaded from a single definition  _(Component: Voice Bank)_
 
