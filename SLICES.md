@@ -45,7 +45,7 @@
 
 **Completion promise:** `SLICE_3_DONE`
 **Depends on:** Slice 2
-**Status:** todo
+**Status:** done
 
 ## Slice 4 — Passthrough Voice ships as the default  _(Component: Voice Bank)_
 
