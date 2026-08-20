@@ -32,7 +32,7 @@
 
 **Completion promise:** `SLICE_2_DONE`
 **Depends on:** Slice 1
-**Status:** todo
+**Status:** done
 
 ## Slice 3 — Voice Bank loads every Voice  _(Component: Voice Bank)_
 
