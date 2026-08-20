@@ -17,15 +17,18 @@ import numpy as np
 from numpy.typing import NDArray
 
 AudioBlock = NDArray[np.float32]
-EffectStep = Callable[[AudioBlock], AudioBlock]
+# The runtime, callable form of an Effect Step, distinct from the
+# declarative Effect Step data (type + params) defined in the Voice Bank
+# (see CONTEXT.md) — later slices bridge from one to the other.
+CompiledEffectStep = Callable[[AudioBlock], AudioBlock]
 
 
-def ProcessChain(steps: list[EffectStep], block: AudioBlock) -> AudioBlock:
-    """Apply an ordered list of Effect Steps to a block of audio.
+def ProcessChain(steps: list[CompiledEffectStep], block: AudioBlock) -> AudioBlock:
+    """Apply an ordered list of compiled Effect Steps to a block of audio.
 
-    steps: ordered list of Effect Steps. Each step must be callable,
-        taking the current block and returning the next block. An empty
-        list leaves the block unchanged (the Passthrough Voice).
+    steps: ordered list of compiled Effect Steps. Each step must be
+        callable, taking the current block and returning the next block.
+        An empty list leaves the block unchanged (the Passthrough Voice).
     block: numpy float32 array shaped (frames, channels), matching the
         indata/outdata convention used by sounddevice's audio callback
         (see app.py's audio_callback).
