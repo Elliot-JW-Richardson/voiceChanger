@@ -1,0 +1,25 @@
+id: magos
+name: Magos
+default: false
+# The flagship cosplay character Voice (see CONTEXT.md's Voice Bank and
+# Deployment scope entries) -- a Warhammer 40K Magos-style robotic,
+# distorted voice. Chains pitch shift, ring modulation, and bitcrush, per
+# CONTEXT.md's example dialogue: "Chain a pitch shift with ring modulation
+# and some distortion -- those are just more Effect Steps in the same
+# list."
+chain:
+  # -10 semitones: noticeably deeper/more extreme than Deep Voice's -6, so
+  # Magos reads as a distinct, more inhuman register rather than just a
+  # louder version of Deep.
+  - type: pitch_shift
+    semitones: -10
+  # 35 Hz: in the tens-of-Hz range this project's ring-mod tests use for a
+  # metallic/robotic buzz (see tests/test_ring_mod_step.py) -- audible as
+  # texture on top of the voice without turning it into pure noise.
+  - type: ring_mod
+    frequency: 35
+  # bit_depth 5: enough quantization grit to read as mechanical distortion
+  # while keeping speech intelligible on top of the pitch shift and ring
+  # mod already applied.
+  - type: bitcrush
+    bit_depth: 5
