@@ -211,7 +211,7 @@
 
 **Completion promise:** `SLICE_15_DONE`
 **Depends on:** Slice 13
-**Status:** todo
+**Status:** done
 
 ## Slice 16 — Volume slider appears on the page  _(Component: Master Volume UI)_
 

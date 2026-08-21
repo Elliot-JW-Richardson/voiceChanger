@@ -73,6 +73,10 @@ def SelectVoice() -> Response:
     ACTIVE_VOICE_HOLDER.Set(selectedVoice)
     return jsonify({"status": "ok", "activeVoiceId": selectedVoice.id})
 
+@app.route("/volume", methods=["GET"])
+def GetVolume() -> Response:
+    return jsonify({"level": MASTER_VOLUME_HOLDER.Get()})
+
 @app.route("/start", methods=["POST"])
 def StartStream() -> Response:
     global AUDIO_STREAM
