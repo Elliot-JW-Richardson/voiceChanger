@@ -10,16 +10,26 @@ from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder
 
 app = Flask(__name__)
 
-SAMPLE_RATE = 48000
-# 8192 rather than the original 1024: pedalboard's PitchShift (Slice 11)
-# has a large, roughly fixed per-call processing cost (~50ms, regardless
-# of block size, since it's re-analyzed from scratch each call under
-# reset=True -- see voice_engine/engine.py's CompilePitchShiftStep
-# docstring) that overruns the ~21ms budget 1024 samples gives at 48kHz,
-# causing real audible output underflow/input overflow. 8192 samples
-# gives an ~170ms budget with a comfortable margin, at the cost of raising
-# one-way audio latency to roughly that same ~170ms.
-BLOCKSIZE = 8192
+# 16000 rather than 48000: pedalboard's PitchShift (Slice 11) has a large,
+# roughly fixed per-call processing cost that barely shrinks with block
+# size (see voice_engine/engine.py's CompilePitchShiftStep docstring).
+# That fixed cost is much smaller at 16kHz than at 48kHz -- benchmarked at
+# roughly 18ms vs roughly 50ms per call -- because there's simply less
+# signal to analyze (speech content is almost entirely below 8kHz, the
+# Nyquist limit at 16kHz, so nothing perceptually relevant is lost for a
+# voice changer). That smaller fixed cost is what lets BLOCKSIZE come back
+# down to 1024 (see below) while staying real-time safe, recovering most
+# of the latency the original underflow/overflow fix traded away.
+SAMPLE_RATE = 16000
+# 1024 gives a 64ms budget at 16kHz. Benchmarked with a comfortable ~2.6x
+# margin (measured ~18-25ms per call, p99/max, against the 64ms budget) --
+# smaller block sizes were tested too, but the fixed per-call cost stays
+# around 16-18ms regardless of block size, so below ~512 samples the
+# margin gets uncomfortably thin (768 samples even spiked over budget once
+# in testing). 1024 is the practical floor found so far without further
+# architectural work (e.g. a proper streaming/ring-buffer decoupling the
+# DSP's chunk size from the callback's block size).
+BLOCKSIZE = 1024
 CHANNELS = 1
 
 # Loaded relative to this file's own location (not the current working
