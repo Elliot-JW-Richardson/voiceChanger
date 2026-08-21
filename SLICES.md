@@ -352,3 +352,60 @@
 **Completion promise:** `SLICE_25_DONE`
 **Depends on:** Slice 23, Slice 24
 **Status:** todo
+
+---
+
+# Band 6 — LLVC feasibility spike
+> **Mini-MVP:** A recorded, evidence-based answer to "is LLVC viable for this project," backed by real installation and timing data from this desktop machine — not a shipped feature. See ADR 0003 for context. Unlike Bands 1-5, these are investigative spikes, not TDD feature slices: a slice ending "blocked" with clearly recorded findings is a legitimate, expected outcome here, not a failure. Deliberately sequenced last — see the conversation around ADR 0003 for why (Bands 4-5 don't depend on this, and isolating a heavy new dependency stack like PyTorch is cleanest done once the DSP work is stable).
+
+## Slice 26 — LLVC installs in an isolated environment  _(Component: ML Voice Spike)_
+
+**Goal:** Determine whether LLVC's dependencies install successfully in an isolated environment, resolving the Python 3.9-vs-3.11 question (ADR 0003) empirically rather than by assumption.
+
+**Verification:**
+- Given a fresh, isolated Python environment separate from this project's main venv
+- When LLVC's dependencies are installed per its own repository instructions
+- Then the outcome (success, or the exact failure) is recorded for Python 3.9, and for Python 3.11 if 3.9 fails
+
+**Completion promise:** `SLICE_26_DONE`
+**Depends on:** none
+**Status:** todo
+
+## Slice 27 — LLVC offline inference smoke test  _(Component: ML Voice Spike)_
+
+**Goal:** Run LLVC's offline `infer.py` against a short sample audio clip and measure wall-clock conversion time on this desktop machine.
+
+**Verification:**
+- Given LLVC installed (Slice 26) and a short sample audio clip
+- When `infer.py` is run against it using a pretrained checkpoint
+- Then the conversion completes and the measured time, compared to the clip's duration, produces a real-time factor for this desktop machine
+
+**Completion promise:** `SLICE_27_DONE`
+**Depends on:** Slice 26
+**Status:** todo
+
+## Slice 28 — LLVC simulated-streaming latency measurement  _(Component: ML Voice Spike)_
+
+**Goal:** Measure per-chunk latency using LLVC's simulated-streaming mode, as the closest available proxy for real-time feasibility before Raspberry Pi hardware exists.
+
+**Verification:**
+- Given LLVC installed (Slice 26)
+- When its simulated-streaming inference mode (the `-s` flag) is run against a sample input
+- Then per-chunk latency is measured and recorded, and compared against this project's established real-time budget (the ~64ms budget from CLAUDE.md's Real-time performance notes) as an optimistic desktop-class upper bound — not a Pi-equivalent result
+
+**Completion promise:** `SLICE_28_DONE`
+**Depends on:** Slice 26
+**Status:** todo
+
+## Slice 29 — Record findings in ADR 0003  _(Component: ML Voice Spike)_
+
+**Goal:** Synthesize Slices 26-28's findings into ADR 0003 and CONTEXT.md, replacing "unverified" with measured numbers and a concrete recommendation on whether to pursue LLVC further.
+
+**Verification:**
+- Given the recorded findings from Slices 26-28
+- When ADR 0003 and CONTEXT.md's LLVC scoping note are updated
+- Then they state the actual measured installation outcome, real-time factor, and simulated-streaming latency, with an explicit recommendation (proceed to real Pi hardware testing once purchased, or abandon the LLVC direction) instead of the current placeholder language
+
+**Completion promise:** `SLICE_29_DONE`
+**Depends on:** Slice 27, Slice 28
+**Status:** todo
