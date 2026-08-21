@@ -185,7 +185,7 @@
 
 **Completion promise:** `SLICE_13_DONE`
 **Depends on:** none
-**Status:** todo
+**Status:** done
 
 ## Slice 14 — Live audio gain applied via Master Volume  _(Component: Runtime)_
 
