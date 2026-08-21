@@ -11,7 +11,15 @@ from voice_engine.runtime import ActiveVoiceHolder
 app = Flask(__name__)
 
 SAMPLE_RATE = 48000
-BLOCKSIZE = 1024
+# 8192 rather than the original 1024: pedalboard's PitchShift (Slice 11)
+# has a large, roughly fixed per-call processing cost (~50ms, regardless
+# of block size, since it's re-analyzed from scratch each call under
+# reset=True -- see voice_engine/engine.py's CompilePitchShiftStep
+# docstring) that overruns the ~21ms budget 1024 samples gives at 48kHz,
+# causing real audible output underflow/input overflow. 8192 samples
+# gives an ~170ms budget with a comfortable margin, at the cost of raising
+# one-way audio latency to roughly that same ~170ms.
+BLOCKSIZE = 8192
 CHANNELS = 1
 
 # Loaded relative to this file's own location (not the current working
