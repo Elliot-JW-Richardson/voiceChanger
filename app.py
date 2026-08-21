@@ -1,10 +1,8 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import sounddevice as sd
-from flask import Flask, jsonify, send_from_directory, request
-import librosa
-import numpy as np
+from flask import Flask, Response, jsonify, send_from_directory, request
 
 from voice_engine.bank import LoadVoiceBank
 from voice_engine.engine import AudioBlock, CompileChain, ProcessChain
@@ -23,7 +21,8 @@ VOICES_DIRECTORY_PATH = Path(__file__).parent / "voices"
 VOICE_BANK = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 ACTIVE_VOICE_HOLDER = ActiveVoiceHolder(VOICE_BANK)
 
-audio_stream = None  # global handle to the stream
+AUDIO_STREAM: Optional[sd.Stream] = None  # global handle to the stream
+
 
 def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: Any, status: sd.CallbackFlags) -> None:
     if status:
@@ -38,78 +37,58 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
 
 
 @app.route("/")
-def index():
+def Index() -> Response:
     # Serve the HTML page from the same directory
     return send_from_directory(".", "index.html")
 
 @app.route("/voices", methods=["GET"])
-def ListVoices():
+def ListVoices() -> Response:
     voices = [{"id": voice.id, "name": voice.name} for voice in VOICE_BANK.voices]
     activeVoiceId = ACTIVE_VOICE_HOLDER.Get().id
     return jsonify({"voices": voices, "activeVoiceId": activeVoiceId})
 
 @app.route("/voices/select", methods=["POST"])
-def SelectVoice():
+def SelectVoice() -> Response:
     requestedId = request.get_json()["id"]
     selectedVoice = next(voice for voice in VOICE_BANK.voices if voice.id == requestedId)
     ACTIVE_VOICE_HOLDER.Set(selectedVoice)
     return jsonify({"status": "ok", "activeVoiceId": selectedVoice.id})
 
 @app.route("/start", methods=["POST"])
-def start_stream():
-    global audio_stream
+def StartStream() -> Response:
+    global AUDIO_STREAM
 
-    if audio_stream is not None:
+    if AUDIO_STREAM is not None:
         return jsonify({"status": "already_running"})
 
     # If you want specific devices, set device=(input_index, output_index)
     # For now this uses default input + default output.
-    audio_stream = sd.Stream(
+    AUDIO_STREAM = sd.Stream(
         samplerate=SAMPLE_RATE,
         blocksize=BLOCKSIZE,
         channels=CHANNELS,
         dtype="float32",
         callback=AudioCallback,
     )
-    audio_stream.start()
+    AUDIO_STREAM.start()
     return jsonify({"status": "started"})
 
-# def apply_pitch_shift(x, sr, semitones):
-#     """
-#     Pitch shift using librosa. This is NOT the most efficient for real-time,
-#     but is okay for experimenting.
-#
-#     x: 1D numpy array
-#     sr: sample rate
-#     semitones: number of semitones to shift
-#     """
-#     if abs(semitones) < 1e-6:
-#         return x
-#     # librosa expects float32 / float64
-#     y = librosa.effects.pitch_shift(x.astype(np.float32), sr=sr, n_steps=semitones)
-#     # Ensure we return the same length as input; trim or pad as needed
-#     if len(y) > len(x):
-#         y = y[:len(x)]
-#     elif len(y) < len(x):
-#         y = np.pad(y, (0, len(x) - len(y)), mode="constant")
-#     return y
-
 @app.route("/stop", methods=["POST"])
-def stop_stream():
-    global audio_stream
+def StopStream() -> Response:
+    global AUDIO_STREAM
 
-    if audio_stream is None:
+    if AUDIO_STREAM is None:
         return jsonify({"status": "not_running"})
 
-    audio_stream.stop()
-    audio_stream.close()
-    audio_stream = None
+    AUDIO_STREAM.stop()
+    AUDIO_STREAM.close()
+    AUDIO_STREAM = None
     return jsonify({"status": "stopped"})
 
 
 @app.route("/status", methods=["GET"])
-def status():
-    running = audio_stream is not None
+def Status() -> Response:
+    running = AUDIO_STREAM is not None
     return jsonify({"running": running})
 
 
