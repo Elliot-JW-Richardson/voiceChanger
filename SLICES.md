@@ -438,10 +438,80 @@
 
 ---
 
-# Band 7 — LLVC feasibility spike
-> **Mini-MVP:** A recorded, evidence-based answer to "is LLVC viable for this project," backed by real installation and timing data from this desktop machine — not a shipped feature. See ADR 0003 for context. Unlike Bands 1-6, these are investigative spikes, not TDD feature slices: a slice ending "blocked" with clearly recorded findings is a legitimate, expected outcome here, not a failure. Deliberately sequenced last — see the conversation around ADR 0003 for why (no other Band depends on this, and isolating a heavy new dependency stack like PyTorch is cleanest done once the DSP work is stable).
+# Band 7 — Vocoder: pitch-tracked, formant-preserving Magos
+> **Mini-MVP:** Speak into the mic with Magos active and hear a pitch-tracked, harmonically-rich electronic voice that still clearly says your words — built from spectral analysis of a real reference track (see ADR 0004), not guesswork. Directly targets both the character-matching goal and the "mumbly" complaint (naive pitch-shift smears formants; a vocoder explicitly preserves them). Built in four genuine stages, each an audible milestone — no throwaway work, pitch tracking is a real prerequisite of the final result, not a detour. Sequenced ahead of the LLVC spike (still deliberately last) since this directly addresses reported quality issues.
 
-## Slice 32 — LLVC installs in an isolated environment  _(Component: ML Voice Spike)_
+## Slice 32 — Pitch tracker detects a known frequency  _(Component: Vocoder)_
+
+**Goal:** Provide a real-time-safe pitch (fundamental frequency) detector that estimates a block's dominant pitch via autocorrelation.
+
+**Verification:**
+- Given a block containing a pure tone of a known frequency
+- When the pitch tracker analyzes it
+- Then it reports a detected frequency close to the known frequency
+
+**Completion promise:** `SLICE_32_DONE`
+**Depends on:** none
+**Status:** todo
+
+## Slice 33 — Vocoder Effect Step: pitch-tracked sawtooth carrier  _(Component: Vocoder)_
+
+**Goal:** Add "vocoder" as a usable Effect Step whose output is a sawtooth oscillator carrier tracking the input block's detected pitch, replacing the block's own waveform with that carrier — a stepping-stone milestone toward full formant vocoding, audible in its own right.
+
+**Verification:**
+- Given a chain containing a vocoder Effect Step and a two-block input where the detected pitch differs between the blocks
+- When the blocks are processed through it
+- Then each output block's dominant frequency matches that block's own detected input pitch, and the output's spectrum shows the rich multi-harmonic structure of a sawtooth wave rather than a single sine tone
+
+**Completion promise:** `SLICE_33_DONE`
+**Depends on:** Slice 32, Slice 1
+**Status:** todo
+
+## Slice 34 — Vocoder applies the modulator's formant envelope to the carrier  _(Component: Vocoder)_
+
+**Goal:** Extend the vocoder Effect Step to shape the pitch-tracked sawtooth carrier with the input voice's own spectral envelope (via a filter bank + envelope followers), turning the raw carrier from Slice 33 into a true formant-vocoded, intelligible signal.
+
+**Verification:**
+- Given a chain containing a vocoder Effect Step and two different input signals that share the same pitch but differ in spectral/formant shape
+- When each is processed through it
+- Then the two outputs differ from each other in spectral shape, proving the carrier is shaped by each input's own envelope rather than output as a flat sawtooth, while both retain the same underlying pitch
+
+**Completion promise:** `SLICE_34_DONE`
+**Depends on:** Slice 33
+**Status:** todo
+
+## Slice 35 — Vocoder switches to a noise carrier for unvoiced input  _(Component: Vocoder)_
+
+**Goal:** Detect when a block has no clear pitch (unvoiced/consonant-like input, e.g. "s", "f", "sh") and use a noise carrier instead of the pitched sawtooth, avoiding an incorrectly tonal sound on consonants.
+
+**Verification:**
+- Given a chain containing a vocoder Effect Step and an input block that is noise-like with no clear pitch
+- When it is processed through it
+- Then the output is noise-carrier-based rather than a tonal sawtooth at some spuriously detected pitch, while a separate clearly-pitched block in the same test still produces the pitched sawtooth carrier as before
+
+**Completion promise:** `SLICE_35_DONE`
+**Depends on:** Slice 33
+**Status:** todo
+
+## Slice 36 — Magos Voice uses the vocoder  _(Component: Voice Bank)_
+
+**Goal:** Re-tune the Magos Voice to use the new vocoder Effect Step, closing the loop from the reference-track analysis (ADR 0004) to an actual audible result.
+
+**Verification:**
+- Given the updated Magos Voice definition
+- When the Voice Bank is loaded
+- Then Magos's chain includes the vocoder Effect Step, and is selectable and becomes active exactly like any other Voice
+
+**Completion promise:** `SLICE_36_DONE`
+**Depends on:** Slice 35, Slice 34, Slice 22
+**Status:** todo
+
+---
+
+# Band 8 — LLVC feasibility spike
+> **Mini-MVP:** A recorded, evidence-based answer to "is LLVC viable for this project," backed by real installation and timing data from this desktop machine — not a shipped feature. See ADR 0003 for context. Unlike Bands 1-7, these are investigative spikes, not TDD feature slices: a slice ending "blocked" with clearly recorded findings is a legitimate, expected outcome here, not a failure. Deliberately sequenced last — see the conversation around ADR 0003 for why (no other Band depends on this, and isolating a heavy new dependency stack like PyTorch is cleanest done once the DSP work is stable).
+
+## Slice 37 — LLVC installs in an isolated environment  _(Component: ML Voice Spike)_
 
 **Goal:** Determine whether LLVC's dependencies install successfully in an isolated environment, resolving the Python 3.9-vs-3.11 question (ADR 0003) empirically rather than by assumption.
 
@@ -450,45 +520,45 @@
 - When LLVC's dependencies are installed per its own repository instructions
 - Then the outcome (success, or the exact failure) is recorded for Python 3.9, and for Python 3.11 if 3.9 fails
 
-**Completion promise:** `SLICE_32_DONE`
+**Completion promise:** `SLICE_37_DONE`
 **Depends on:** none
 **Status:** todo
 
-## Slice 33 — LLVC offline inference smoke test  _(Component: ML Voice Spike)_
+## Slice 38 — LLVC offline inference smoke test  _(Component: ML Voice Spike)_
 
 **Goal:** Run LLVC's offline `infer.py` against a short sample audio clip and measure wall-clock conversion time on this desktop machine.
 
 **Verification:**
-- Given LLVC installed (Slice 32) and a short sample audio clip
+- Given LLVC installed (Slice 37) and a short sample audio clip
 - When `infer.py` is run against it using a pretrained checkpoint
 - Then the conversion completes and the measured time, compared to the clip's duration, produces a real-time factor for this desktop machine
 
-**Completion promise:** `SLICE_33_DONE`
-**Depends on:** Slice 32
+**Completion promise:** `SLICE_38_DONE`
+**Depends on:** Slice 37
 **Status:** todo
 
-## Slice 34 — LLVC simulated-streaming latency measurement  _(Component: ML Voice Spike)_
+## Slice 39 — LLVC simulated-streaming latency measurement  _(Component: ML Voice Spike)_
 
 **Goal:** Measure per-chunk latency using LLVC's simulated-streaming mode, as the closest available proxy for real-time feasibility before Raspberry Pi hardware exists.
 
 **Verification:**
-- Given LLVC installed (Slice 32)
+- Given LLVC installed (Slice 37)
 - When its simulated-streaming inference mode (the `-s` flag) is run against a sample input
 - Then per-chunk latency is measured and recorded, and compared against this project's established real-time budget (the ~139ms budget from CLAUDE.md's Real-time performance notes) as an optimistic desktop-class upper bound — not a Pi-equivalent result
 
-**Completion promise:** `SLICE_34_DONE`
-**Depends on:** Slice 32
+**Completion promise:** `SLICE_39_DONE`
+**Depends on:** Slice 37
 **Status:** todo
 
-## Slice 35 — Record findings in ADR 0003  _(Component: ML Voice Spike)_
+## Slice 40 — Record findings in ADR 0003  _(Component: ML Voice Spike)_
 
-**Goal:** Synthesize Slices 33-34's findings into ADR 0003 and CONTEXT.md, replacing "unverified" with measured numbers and a concrete recommendation on whether to pursue LLVC further.
+**Goal:** Synthesize Slices 38-39's findings into ADR 0003 and CONTEXT.md, replacing "unverified" with measured numbers and a concrete recommendation on whether to pursue LLVC further.
 
 **Verification:**
-- Given the recorded findings from Slices 33-34
+- Given the recorded findings from Slices 38-39
 - When ADR 0003 and CONTEXT.md's LLVC scoping note are updated
 - Then they state the actual measured installation outcome, real-time factor, and simulated-streaming latency, with an explicit recommendation (proceed to real Pi hardware testing once purchased, or abandon the LLVC direction) instead of the current placeholder language
 
-**Completion promise:** `SLICE_35_DONE`
-**Depends on:** Slice 33, Slice 34
+**Completion promise:** `SLICE_40_DONE`
+**Depends on:** Slice 38, Slice 39
 **Status:** todo
