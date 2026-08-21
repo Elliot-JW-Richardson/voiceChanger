@@ -62,6 +62,14 @@
                     if (voice.id === data.activeVoiceId) {
                         optionBtn.classList.add('active');
                     }
+                    optionBtn.addEventListener('click', async () => {
+                        await fetch('/voices/select', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: voice.id })
+                        });
+                        renderVoiceList();
+                    });
                     voiceListEl.appendChild(optionBtn);
                 });
             }

@@ -136,7 +136,7 @@
 
 **Completion promise:** `SLICE_10_DONE`
 **Depends on:** Slice 9, Slice 8
-**Status:** todo
+**Status:** done
 
 ---
 
