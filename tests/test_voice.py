@@ -12,7 +12,7 @@ from pathlib import Path
 from voice_engine.voice import EffectStep, LoadVoice, Voice
 
 
-def test_voice_loaded_from_definition_exposes_id_name_and_ordered_chain(tmp_path: Path) -> None:
+def test_VoiceLoadedFromDefinitionExposesIdNameAndOrderedChain(tmp_path: Path) -> None:
     voiceFilePath = tmp_path / "example.yaml"
     voiceFilePath.write_text(
         """
@@ -39,7 +39,7 @@ chain:
     ]
 
 
-def test_voice_loaded_from_definition_with_empty_chain_and_default_flag(tmp_path: Path) -> None:
+def test_VoiceLoadedFromDefinitionWithEmptyChainAndDefaultFlag(tmp_path: Path) -> None:
     voiceFilePath = tmp_path / "passthrough.yaml"
     voiceFilePath.write_text(
         """

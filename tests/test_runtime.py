@@ -12,7 +12,7 @@ from voice_engine.runtime import ActiveVoiceHolder
 from voice_engine.voice import Voice
 
 
-def test_active_voice_holder_initializes_from_default_and_can_be_updated() -> None:
+def test_ActiveVoiceHolderInitializesFromDefaultAndCanBeUpdated() -> None:
     defaultVoice = Voice(id="passthrough", name="Passthrough", default=True, chain=[])
     otherVoice = Voice(id="example", name="Example Voice", default=False, chain=[])
     voiceBank = VoiceBank(voices=[defaultVoice, otherVoice], defaultVoice=defaultVoice)

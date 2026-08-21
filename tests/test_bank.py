@@ -14,7 +14,7 @@ from voice_engine.bank import LoadVoiceBank
 from voice_engine.voice import Voice
 
 
-def test_voice_bank_loads_every_definition_and_identifies_default(tmp_path: Path) -> None:
+def test_VoiceBankLoadsEveryDefinitionAndIdentifiesDefault(tmp_path: Path) -> None:
     (tmp_path / "passthrough.yaml").write_text(
         """
 id: passthrough

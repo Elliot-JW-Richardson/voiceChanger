@@ -10,7 +10,7 @@ import numpy as np
 from voice_engine.engine import ProcessChain
 
 
-def test_empty_chain_returns_block_unchanged() -> None:
+def test_EmptyChainReturnsBlockUnchanged() -> None:
     # Block shape/dtype matches sounddevice's indata/outdata convention:
     # float32, (frames, channels) — see app.py's audio_callback.
     rng = np.random.default_rng(0)

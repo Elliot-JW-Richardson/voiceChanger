@@ -17,7 +17,7 @@ from voice_engine.bank import LoadVoiceBank
 VOICES_DIRECTORY_PATH = Path(__file__).parent.parent / "voices"
 
 
-def test_passthrough_voice_ships_with_empty_chain_and_is_default() -> None:
+def test_PassthroughVoiceShipsWithEmptyChainAndIsDefault() -> None:
     voiceBank = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 
     passthroughVoice = next(voice for voice in voiceBank.voices if voice.id == "passthrough")

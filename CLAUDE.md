@@ -44,7 +44,7 @@ Deliberate deviation from PEP 8, established starting with the Slice 1 implement
 - **Variables**: `camelCase` (e.g. `activeVoice`, `sampleRate`)
 - **Functions and classes**: `PascalCase` (e.g. `def ProcessChain(...)`, `class VoiceBank`)
 - **Global (module-level) variables**: `SCREAMING_SNAKE_CASE` (e.g. `SAMPLE_RATE`, `ACTIVE_VOICE`)
-- **Exception**: pytest test functions keep the `test_` lowercase-snake-case prefix pytest's default discovery requires (e.g. `def test_empty_chain_returns_block_unchanged():`) — this is a framework constraint, not a style choice.
+- **Exception**: pytest test functions keep the mandatory lowercase `test_` prefix pytest's default discovery requires, but everything after it follows the normal PascalCase function rule (e.g. `def test_EmptyChainReturnsBlockUnchanged():`, not `test_empty_chain_returns_block_unchanged`). Only the literal `test_` is a framework constraint — the rest is not exempt from the convention.
 - **Fully type hinted**: every function/method signature has argument and return type annotations (including `-> None` where nothing is returned, and on test functions). Local variables don't need annotations unless the assigned value's type isn't obvious. Not currently enforced by a linter/type checker — it's a stated convention, not a CI gate.
 
 `app.py` and `main.py` predate this convention and still use standard Python snake_case; they'll be brought into compliance as upcoming slices touch them (the audio callback rewrite in Slice 6, the pitch-endpoint removal in Slice 9), not retrofitted wholesale.
