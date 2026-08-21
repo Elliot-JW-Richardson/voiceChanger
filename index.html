@@ -28,6 +28,11 @@
     <div id="status">(stopped)</div>
     <div id="voiceList"></div>
 
+    <div id="volumeControl">
+        <label for="volumeSlider">Master Volume</label>
+        <input type="range" id="volumeSlider" min="0" max="200" value="100">
+    </div>
+
     <script>
         document.addEventListener("DOMContentLoaded", () => {
 
@@ -74,9 +79,16 @@
                 });
             }
 
+            async function renderVolumeSlider() {
+                const res = await fetch('/volume');
+                const data = await res.json();
+                document.getElementById('volumeSlider').value = data.level;
+            }
+
             // Initial status
             refreshStatus();
             renderVoiceList();
+            renderVolumeSlider();
 
         });
     </script>

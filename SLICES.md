@@ -224,7 +224,7 @@
 
 **Completion promise:** `SLICE_16_DONE`
 **Depends on:** Slice 15
-**Status:** todo
+**Status:** done
 
 ## Slice 17 — Set volume  _(Component: Master Volume API)_
 
