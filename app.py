@@ -10,26 +10,32 @@ from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder
 
 app = Flask(__name__)
 
-# 16000 rather than 48000: pedalboard's PitchShift (Slice 11) has a large,
-# roughly fixed per-call processing cost that barely shrinks with block
-# size (see voice_engine/engine.py's CompilePitchShiftStep docstring).
-# That fixed cost is much smaller at 16kHz than at 48kHz -- benchmarked at
-# roughly 18ms vs roughly 50ms per call -- because there's simply less
-# signal to analyze (speech content is almost entirely below 8kHz, the
-# Nyquist limit at 16kHz, so nothing perceptually relevant is lost for a
-# voice changer). That smaller fixed cost is what lets BLOCKSIZE come back
-# down to 1024 (see below) while staying real-time safe, recovering most
-# of the latency the original underflow/overflow fix traded away.
-SAMPLE_RATE = 16000
-# 1024 gives a 64ms budget at 16kHz. Benchmarked with a comfortable ~2.6x
-# margin (measured ~18-25ms per call, p99/max, against the 64ms budget) --
-# smaller block sizes were tested too, but the fixed per-call cost stays
-# around 16-18ms regardless of block size, so below ~512 samples the
-# margin gets uncomfortably thin (768 samples even spiked over budget once
-# in testing). 1024 is the practical floor found so far without further
-# architectural work (e.g. a proper streaming/ring-buffer decoupling the
-# DSP's chunk size from the callback's block size).
-BLOCKSIZE = 1024
+# 22050 rather than 16000: 16kHz's 8kHz Nyquist ceiling was cutting real
+# speech clarity (reported as "mumbly") -- consonant/sibilant content
+# lives partly above 8kHz. 22050 raises that ceiling to 11025Hz, a
+# meaningful clarity improvement, while still being cheaper to process
+# than 44.1/48kHz (pedalboard's PitchShift cost scales with sample rate --
+# see CompilePitchShiftStep's docstring).
+#
+# IMPORTANT: the 16000/1024 configuration this replaced was benchmarked
+# against pitch shift ALONE (Slice 11, before ring modulation or bitcrush
+# existed) and never re-validated against the full worst-case chain (the
+# Magos Voice's pitch-shift + ring-mod + bitcrush, Slice 22) -- doing so
+# later found real occasional budget overruns (~1.7% of calls in one
+# 300-call test) that pitch-shift-alone benchmarking had missed entirely.
+# When tuning these constants, always benchmark against the heaviest
+# Voice actually shipped (voices/magos.yaml currently), not a single
+# Effect Step in isolation.
+SAMPLE_RATE = 22050
+# 3072 gives a 139ms budget. Benchmarked against the full Magos chain
+# specifically (not pitch shift alone): 0/300 calls over budget across two
+# independent runs, p99 ~51ms, worst observed max ~112ms (~1.25x margin
+# even at that worst case). This machine's benchmarks show real run-to-run
+# jitter (a "safe" 16000/1024 config passed 0/200 in one run and failed
+# 5/300 in another) -- picked for a comfortable margin against that
+# variance, not just a clean-looking single run. Higher latency than the
+# previous 64ms, lower than the original underflow/overflow fix's 170ms.
+BLOCKSIZE = 3072
 CHANNELS = 1
 
 # Loaded relative to this file's own location (not the current working
@@ -62,7 +68,7 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
     # active -- not a Voice, not an Effect Step, so it's applied here
     # rather than folded into COMPILED_CHAIN_CACHE/ProcessChain above.
     masterVolumeLevel = MASTER_VOLUME_HOLDER.Get()
-    outdata[:] = ApplyMasterVolume(processedBlock, masterVolumeLevel)
+    outdata[:] = ApplyMasterVolume(processedBlock, masterVolumeLevel, SAMPLE_RATE)
 
 
 @app.route("/")
