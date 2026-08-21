@@ -11,9 +11,10 @@ expects. Slice 11 adds the first concrete Effect Step type, pitch shift
 correctly -- hence `CompileChain` takes `sampleRate` and bakes it into
 the closures it builds for steps that need it. Slice 19 adds the second
 concrete type, ring modulation (a trivial custom oscillator multiply --
-`pedalboard` doesn't provide it). Remaining palette types
-(distortion/bitcrush, EQ, reverb) arrive in later slices, 20 onward, and
-still raise `NotImplementedError` until then.
+`pedalboard` doesn't provide it). Slice 20 adds the third, distortion/
+bitcrush (via `pedalboard.Bitcrush`). Remaining palette types (EQ,
+reverb) arrive in later slices, 23 onward, and still raise
+`NotImplementedError` until then.
 
 IMPORTANT for anyone adding a new Effect Step type: any expensive setup
 (e.g. constructing a `pedalboard.Pedalboard`/plugin instance) MUST happen
@@ -30,7 +31,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Pedalboard, PitchShift
+from pedalboard import Bitcrush, Pedalboard, PitchShift
 
 from voice_engine.voice import EffectStep, Voice
 
@@ -116,6 +117,42 @@ def CompileRingModStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     return RingModStep
 
 
+def CompileBitcrushStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `bitcrush` Effect Step into a callable that runs a block
+    through `pedalboard.Bitcrush` (see CONTEXT.md's Effect palette entry:
+    "distortion/bitcrush (grit)").
+
+    Follows the exact same pattern as `CompilePitchShiftStep`: the
+    `Pedalboard`/`Bitcrush` instance is constructed ONCE here, at compile
+    time, and reused for every subsequent block via the closure --
+    constructing it per-block would be expensive setup work happening on
+    the real-time audio callback thread, which is the bug class this
+    project's "Real-time performance" notes (CLAUDE.md) warn against.
+
+    `.process()` is called with the default `reset=True`, same rationale
+    as pitch shift: it guarantees the output is always the SAME LENGTH as
+    the input block, a hard requirement of this project's fixed-block-size
+    `outdata[:] = ...` contract. Bitcrush is stateless across blocks (no
+    phase or buffered samples to carry, unlike ring modulation), so this
+    costs nothing here.
+
+    `step.params["bit_depth"]` matches `pedalboard.Bitcrush`'s own
+    constructor parameter name (`Bitcrush(bit_depth=8)` by default); each
+    sample is quantized onto `2 ** bit_depth` values per pedalboard's own
+    docs (though the true number of distinct sample values observed in
+    output also depends on how those levels tile across the signal's
+    actual [-1, 1] range -- see tests/test_bitcrush_step.py).
+    """
+    bitDepth = step.params["bit_depth"]
+    pedalboardChain = Pedalboard([Bitcrush(bit_depth=bitDepth)])
+
+    def BitcrushStep(block: AudioBlock) -> AudioBlock:
+        crushedBlock = pedalboardChain.process(block, sampleRate, reset=True)
+        return crushedBlock.astype(np.float32)
+
+    return BitcrushStep
+
+
 def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
@@ -123,10 +160,10 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
     sampleRate: the audio stream's sample rate in Hz, needed by Effect
         Step types (e.g. pitch shift) whose underlying DSP depends on it.
 
-    Dispatches by each step's `type`; `pitch_shift` (Slice 11) and
-    `ring_mod` (Slice 19) are the concrete types handled so far. Any
-    other type raises `NotImplementedError` -- distortion/bitcrush, EQ,
-    and reverb arrive in later slices (20, 23, 24).
+    Dispatches by each step's `type`; `pitch_shift` (Slice 11), `ring_mod`
+    (Slice 19), and `bitcrush` (Slice 20) are the concrete types handled
+    so far. Any other type raises `NotImplementedError` -- EQ and reverb
+    arrive in later slices (23, 24).
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
@@ -134,6 +171,8 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompilePitchShiftStep(step, sampleRate))
         elif step.type == "ring_mod":
             compiledSteps.append(CompileRingModStep(step, sampleRate))
+        elif step.type == "bitcrush":
+            compiledSteps.append(CompileBitcrushStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps

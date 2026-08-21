@@ -281,7 +281,7 @@
 
 **Completion promise:** `SLICE_20_DONE`
 **Depends on:** Slice 1
-**Status:** todo
+**Status:** done
 
 ## Slice 21 — Effect Steps compose in declared order  _(Component: Effect Engine)_
 
