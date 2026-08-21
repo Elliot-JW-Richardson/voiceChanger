@@ -42,10 +42,19 @@ def test_DeepVoiceShipsWithPitchShiftChainAlongsidePassthrough() -> None:
 
 def test_SelectDeepVoiceSetsItAsActive() -> None:
     client: FlaskClient = app.test_client()
+    previouslyActiveVoice = ACTIVE_VOICE_HOLDER.Get()
 
-    response = client.post("/voices/select", json={"id": "deep"})
-    body: Any = response.get_json()
+    try:
+        response = client.post("/voices/select", json={"id": "deep"})
+        body: Any = response.get_json()
 
-    assert body["status"] == "ok"
-    assert body["activeVoiceId"] == "deep"
-    assert ACTIVE_VOICE_HOLDER.Get().id == "deep"
+        assert body["status"] == "ok"
+        assert body["activeVoiceId"] == "deep"
+        assert ACTIVE_VOICE_HOLDER.Get().id == "deep"
+    finally:
+        # ACTIVE_VOICE_HOLDER is a shared module-level global (see
+        # CLAUDE.md's Architecture notes) that outlives this test within
+        # the pytest process -- restore it so other test modules that
+        # assume the default active Voice (e.g. test_list_voices.py)
+        # aren't affected by test ordering.
+        ACTIVE_VOICE_HOLDER.Set(previouslyActiveVoice)

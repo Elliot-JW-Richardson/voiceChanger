@@ -1,0 +1,6 @@
+id: deep
+name: Deep
+default: false
+chain:
+  - type: pitch_shift
+    semitones: -6
