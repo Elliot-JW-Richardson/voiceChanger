@@ -26,6 +26,8 @@ One entry in a DSP Voice's chain: an effect type plus its parameters (e.g. `{"ty
 ### Effect palette (v1)
 The set of Effect Step types the engine supports: **pitch shift**, **ring modulation** (metallic/robotic buzz — multiplies the signal by a sine oscillator), **distortion/bitcrush** (grit), **EQ** (low/high shelf), and **reverb**. All five are real-time-safe via `pedalboard` (ring mod excepted, which is a trivial custom oscillator multiply).
 
+**Bitcrush gotcha (learned the hard way on Magos — see git history):** `pedalboard.Bitcrush` quantizes in fixed steps across the full `[-1, 1]` range, not relative to the actual signal's amplitude. A `bit_depth` that sounds like tasteful grit against a full-scale test tone can collapse a quiet real microphone signal (this hardware's mic is already known to be quiet — see the Master Volume entry) to only a handful of distinct values, heard as buzzy squeaks rather than a voice. When tuning or adding a bitcrush-using Voice, verify against a realistic quiet input amplitude, not just a loud test tone — see `tests/test_bitcrush_step.py::test_BitcrushStepStaysReasonablyIntelligibleOnQuietRealisticInput` for the pattern.
+
 **Formant shift** (alters vocal-tract resonance independent of pitch) is a recognized future effect type, deferred out of v1: it has no drop-in real-time implementation (classically LPC or phase-vocoder based) and doesn't fit the small-buffer live-callback model the rest of the palette is built around. Revisit once the Voice Bank architecture is proven end-to-end.
 
 ### Master Volume
