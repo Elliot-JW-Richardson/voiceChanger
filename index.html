@@ -85,6 +85,16 @@
                 document.getElementById('volumeSlider').value = data.level;
             }
 
+            const volumeSlider = document.getElementById('volumeSlider');
+            volumeSlider.addEventListener('change', async () => {
+                const newLevel = parseInt(volumeSlider.value, 10);
+                await fetch('/volume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ level: newLevel })
+                });
+            });
+
             // Initial status
             refreshStatus();
             renderVoiceList();
