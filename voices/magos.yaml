@@ -18,8 +18,14 @@ chain:
   # texture on top of the voice without turning it into pure noise.
   - type: ring_mod
     frequency: 35
-  # bit_depth 5: enough quantization grit to read as mechanical distortion
-  # while keeping speech intelligible on top of the pitch shift and ring
-  # mod already applied.
+  # bit_depth 10 (raised from an initial 5 -- see git history and
+  # CONTEXT.md's Effect palette entry): pedalboard.Bitcrush quantizes in
+  # FIXED steps across the full [-1, 1] range, not relative to the actual
+  # signal's amplitude. bit_depth 5 sounded fine against a full-scale test
+  # tone but collapsed real (quiet) microphone input to only 3-4 distinct
+  # values total -- heard as buzzy squeaks, not a voice. 10 keeps
+  # meaningful grit at full volume while staying intelligible at realistic
+  # quiet input levels. Re-tune by ear if your mic input level changes
+  # (e.g. after adjusting OS/hardware input gain).
   - type: bitcrush
-    bit_depth: 5
+    bit_depth: 10

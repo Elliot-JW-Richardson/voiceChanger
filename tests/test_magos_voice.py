@@ -43,7 +43,12 @@ def test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder() -> None:
     assert ringModStep.params["frequency"] > 0
 
     assert bitcrushStep.type == "bitcrush"
-    assert 1 <= bitcrushStep.params["bit_depth"] <= 8
+    # Raised from an original <= 8 sanity bound: bit_depth had to go up to
+    # 10 to stay intelligible on quiet real microphone input rather than
+    # collapsing to a handful of distinct values (see git history and
+    # CONTEXT.md's Effect palette entry on pedalboard.Bitcrush's
+    # fixed-scale quantization).
+    assert 1 <= bitcrushStep.params["bit_depth"] <= 12
 
 
 def test_SelectMagosVoiceSetsItAsActive() -> None:
