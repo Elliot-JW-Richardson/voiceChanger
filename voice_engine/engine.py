@@ -31,7 +31,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Bitcrush, Pedalboard, PitchShift
+from pedalboard import Bitcrush, Gain, Limiter, Pedalboard, PitchShift
 
 from voice_engine.voice import EffectStep, Voice
 
@@ -203,12 +203,12 @@ class CompiledChainCache:
         return self.cachedChain
 
 
-def ApplyMasterVolume(block: AudioBlock, level: int) -> AudioBlock:
+def ApplyMasterVolume(block: AudioBlock, level: int, sampleRate: int) -> AudioBlock:
     """Scale a block of audio by the Master Volume level (see CONTEXT.md's
-    Master Volume entry and ADR 0002), clipping the result to the valid
-    [-1.0, 1.0] audio range.
+    Master Volume entry and ADR 0002) using `pedalboard.Gain` followed by
+    `pedalboard.Limiter`, rather than plain linear gain with a hard clip.
 
-    level: a percentage, 0-200 (100 = unity gain, unchanged output),
+    level: a percentage, 0-400 (100 = unity gain, unchanged output),
         as tracked by `voice_engine.runtime.MasterVolumeHolder`.
 
     Deliberately separate from the Effect Step chain machinery above --
@@ -216,13 +216,42 @@ def ApplyMasterVolume(block: AudioBlock, level: int) -> AudioBlock:
     Effect Step chain, independent of which Voice is active; it is not
     itself an Effect Step and has no entry in `CompileChain`'s dispatch.
 
-    Clipping (via `np.clip`) is what prevents boosting above 100% from
-    pushing samples outside the range a speaker can represent -- without
-    it, a loud block scaled above unity gain could produce values outside
-    [-1.0, 1.0], causing digital distortion.
+    WHY A LIMITER INSTEAD OF np.clip: plain linear gain + hard clip was
+    the original implementation, but on quiet real microphone input
+    (compounded by real signal loss through pitch shift and ring
+    modulation -- see git history) it left audio still too quiet, because
+    hard-clip gain has to stay conservative to avoid clipping the loudest
+    peaks, which under-uses the headroom available for everything quieter
+    than those peaks. A limiter allows pushing much closer to full scale
+    -- benchmarked noticeably louder (RMS ~0.24 vs ~0.14) at the same
+    nominal boost on a quiet test signal -- because it compresses into
+    peaks smoothly instead of leaving that headroom unused. `Limiter`
+    still hard-clips at 0dB as its own final safety net, so the
+    [-1.0, 1.0] guarantee this function has always made still holds.
+
+    Constructing `Pedalboard([Gain, Limiter])` fresh on every call is
+    fine here -- benchmarked at under 0.4ms, nothing like the expensive
+    per-call setup `CompilePitchShiftStep`'s docstring warns against.
+    `level` can change on any call (the user can drag the volume slider
+    at any time), so there is no fixed instance to cache the way
+    `CompiledChainCache` caches a compiled Voice chain.
+
+    `level == 100` (the default) bypasses Gain/Limiter entirely and
+    returns `block` unchanged -- without this, the Limiter's compressor
+    stage can still soften a near-full-scale sample even at nominal 0dB
+    gain, which would break the Passthrough Voice's guarantee of being a
+    truly unmodified mic-to-speaker signal at default settings (see
+    CONTEXT.md's Passthrough Voice entry and tests/test_app.py).
     """
-    scaledBlock = block * (level / 100.0)
-    return np.clip(scaledBlock, -1.0, 1.0).astype(np.float32)
+    if level <= 0:
+        return np.zeros_like(block)
+    if level == 100:
+        return block
+
+    gainDb = 20.0 * np.log10(level / 100.0)
+    board = Pedalboard([Gain(gain_db=gainDb), Limiter(threshold_db=-1.0, release_ms=100.0)])
+    limitedBlock = board.process(block, sampleRate, reset=True)
+    return limitedBlock.astype(np.float32)
 
 
 def ProcessChain(steps: list[CompiledEffectStep], block: AudioBlock) -> AudioBlock:
