@@ -5,7 +5,7 @@ import sounddevice as sd
 from flask import Flask, Response, jsonify, send_from_directory, request
 
 from voice_engine.bank import LoadVoiceBank
-from voice_engine.engine import AudioBlock, CompileChain, ProcessChain
+from voice_engine.engine import AudioBlock, CompiledChainCache, ProcessChain
 from voice_engine.runtime import ActiveVoiceHolder
 
 app = Flask(__name__)
@@ -20,6 +20,7 @@ CHANNELS = 1
 VOICES_DIRECTORY_PATH = Path(__file__).parent / "voices"
 VOICE_BANK = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 ACTIVE_VOICE_HOLDER = ActiveVoiceHolder(VOICE_BANK)
+COMPILED_CHAIN_CACHE = CompiledChainCache(SAMPLE_RATE)
 
 AUDIO_STREAM: Optional[sd.Stream] = None  # global handle to the stream
 
@@ -30,9 +31,12 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
     # Route microphone input through the currently active Voice's chain
     # rather than copying it straight to speakers/headphones. Note: this
     # runs on sounddevice's own real-time audio thread, not the Flask
-    # request thread (see CLAUDE.md's Architecture notes).
+    # request thread (see CLAUDE.md's Architecture notes). Compiling the
+    # chain fresh on every block was expensive enough to cause audible
+    # underflow/overflow once pitch shift landed -- COMPILED_CHAIN_CACHE
+    # only recompiles when the active Voice actually changes.
     activeVoice = ACTIVE_VOICE_HOLDER.Get()
-    compiledChain = CompileChain(activeVoice.chain, SAMPLE_RATE)
+    compiledChain = COMPILED_CHAIN_CACHE.Get(activeVoice)
     outdata[:] = ProcessChain(compiledChain, indata)
 
 

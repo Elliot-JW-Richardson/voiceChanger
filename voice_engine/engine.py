@@ -12,14 +12,25 @@ correctly -- hence `CompileChain` takes `sampleRate` and bakes it into
 the closures it builds for steps that need it. Remaining palette types
 (ring modulation, distortion/bitcrush, EQ, reverb) arrive in later
 slices, 13 onward, and still raise `NotImplementedError` until then.
+
+IMPORTANT for anyone adding a new Effect Step type: any expensive setup
+(e.g. constructing a `pedalboard.Pedalboard`/plugin instance) MUST happen
+once inside the `Compile*Step` function, not inside the returned
+`CompiledEffectStep` closure. The closure runs on the real-time audio
+callback thread once per ~21ms block (BLOCKSIZE=1024 @ SAMPLE_RATE=48000)
+-- doing expensive work there causes audible underflow/overflow (see the
+bug this comment is fixing). Similarly, callers of `CompileChain` should
+not call it fresh on every block either; use `CompiledChainCache` below
+to recompile only when the active Voice actually changes.
 """
 from collections.abc import Callable
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
 from pedalboard import Pedalboard, PitchShift
 
-from voice_engine.voice import EffectStep
+from voice_engine.voice import EffectStep, Voice
 
 AudioBlock = NDArray[np.float32]
 # The runtime, callable form of an Effect Step, distinct from the
@@ -32,13 +43,26 @@ def CompilePitchShiftStep(step: EffectStep, sampleRate: int) -> CompiledEffectSt
     """Compile a `pitch_shift` Effect Step into a callable that runs a
     block through `pedalboard.PitchShift`.
 
-    `pedalboard.Pedalboard.process()` needs a sample rate to shift pitch
-    correctly, so `sampleRate` is baked into the returned closure at
-    compile time. No cross-block streaming state is kept (see SLICES.md,
-    Slice 11's scope notes) -- each call builds a fresh `Pedalboard`,
-    which is simple and sufficient since pitch shift has no phase-
-    continuity requirement across blocks (unlike ring modulation,
-    Slice 13).
+    The `Pedalboard`/`PitchShift` instance is constructed ONCE here, at
+    compile time, and reused for every subsequent block via the closure
+    -- constructing it per-block (as an earlier version of this function
+    did) was expensive enough to blow the real-time budget and cause
+    audible underflow/overflow.
+
+    `.process()` is called with the default `reset=True`: each block is
+    treated as its own complete, independent signal, which is what
+    guarantees the output is always the SAME LENGTH as the input block --
+    a hard requirement here, since `AudioCallback` writes the result
+    straight into a fixed-size `outdata` buffer via `outdata[:] = ...`.
+    `reset=False` (pedalboard's true streaming mode, tried and reverted --
+    see git history) holds samples back internally to reduce latency
+    across many small calls, and returns a SHORTER block than it was
+    given on the first call, which breaks that invariant. The trade-off
+    of `reset=True` is that each block's pitch-shift processing doesn't
+    carry state across the block boundary, which could in principle cause
+    small block-edge artifacts -- not covered by this slice's acceptance
+    criteria (see SLICES.md, Slice 11), unlike ring modulation's Slice 13,
+    which explicitly tests phase continuity.
 
     This project's `AudioBlock` convention -- (frames, channels) float32,
     matching sounddevice's indata/outdata -- is also the shape
@@ -48,10 +72,10 @@ def CompilePitchShiftStep(step: EffectStep, sampleRate: int) -> CompiledEffectSt
     in the same (frames, channels) layout.
     """
     semitones = step.params["semitones"]
+    pedalboardChain = Pedalboard([PitchShift(semitones=semitones)])
 
     def PitchShiftStep(block: AudioBlock) -> AudioBlock:
-        pedalboardChain = Pedalboard([PitchShift(semitones=semitones)])
-        shiftedBlock = pedalboardChain.process(block, sampleRate)
+        shiftedBlock = pedalboardChain.process(block, sampleRate, reset=True)
         return shiftedBlock.astype(np.float32)
 
     return PitchShiftStep
@@ -77,6 +101,31 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps
+
+
+class CompiledChainCache:
+    """Caches the compiled chain for the most recently seen active Voice,
+    recompiling only when the Voice actually changes (by id).
+
+    `CompileChain` can be expensive (e.g. constructing a `pedalboard`
+    plugin instance per Effect Step) -- calling it fresh on every audio
+    block, as the live callback originally did, reintroduces the same
+    real-time performance problem `CompilePitchShiftStep`'s docstring
+    describes, just one layer up. This cache is what lets the audio
+    callback call `CompileChain` effectively once per Voice selection
+    instead of once per ~21ms block.
+    """
+
+    def __init__(self, sampleRate: int) -> None:
+        self.sampleRate = sampleRate
+        self.cachedVoiceId: Optional[str] = None
+        self.cachedChain: list[CompiledEffectStep] = []
+
+    def Get(self, voice: Voice) -> list[CompiledEffectStep]:
+        if voice.id != self.cachedVoiceId:
+            self.cachedChain = CompileChain(voice.chain, self.sampleRate)
+            self.cachedVoiceId = voice.id
+        return self.cachedChain
 
 
 def ProcessChain(steps: list[CompiledEffectStep], block: AudioBlock) -> AudioBlock:
