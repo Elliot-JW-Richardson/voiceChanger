@@ -355,10 +355,93 @@
 
 ---
 
-# Band 6 — LLVC feasibility spike
-> **Mini-MVP:** A recorded, evidence-based answer to "is LLVC viable for this project," backed by real installation and timing data from this desktop machine — not a shipped feature. See ADR 0003 for context. Unlike Bands 1-5, these are investigative spikes, not TDD feature slices: a slice ending "blocked" with clearly recorded findings is a legitimate, expected outcome here, not a failure. Deliberately sequenced last — see the conversation around ADR 0003 for why (Bands 4-5 don't depend on this, and isolating a heavy new dependency stack like PyTorch is cleanest done once the DSP work is stable).
+# Band 6 — Noise Gate control
+> **Mini-MVP:** Drag the noise gate slider on the page and background noise gets filtered out before it ever reaches the Voice's effect chain, no matter which Voice is selected. Added after real-world testing of Magos reported the output as "mumbly" and wanting background-noise filtering (see CONTEXT.md's Noise Gate entry). Mirrors Band 3 (Master Volume)'s structure exactly, applied to the raw input before the Voice chain instead of the output after it.
 
-## Slice 26 — LLVC installs in an isolated environment  _(Component: ML Voice Spike)_
+## Slice 26 — Noise Gate holder  _(Component: Runtime)_
+
+**Goal:** Track a single global Noise Gate sensitivity level, safely readable and settable, defaulting to 0% (gate fully open, no gating).
+
+**Verification:**
+- Given the Noise Gate holder is initialized
+- When it is read before any change, and then set to a different level and read again
+- Then the first read reports 0%, and the second read reports the newly set level
+
+**Completion promise:** `SLICE_26_DONE`
+**Depends on:** none
+**Status:** todo
+
+## Slice 27 — Live audio gated before the Voice chain  _(Component: Runtime)_
+
+**Goal:** Attenuate the live audio callback's raw microphone input by the Noise Gate level before it reaches the active Voice's chain, filtering background noise while passing voice through largely unaffected.
+
+**Verification:**
+- Given the Noise Gate is set to a level that would attenuate a quiet, noise-like block
+- When that block is processed
+- Then the output is measurably attenuated compared to processing it with the gate fully open, while a louder, voice-like block above the threshold remains largely unaffected
+
+**Completion promise:** `SLICE_27_DONE`
+**Depends on:** Slice 26, Slice 6
+**Status:** todo
+
+## Slice 28 — Get current noise gate level  _(Component: Noise Gate API)_
+
+**Goal:** Expose the current Noise Gate level over HTTP.
+
+**Verification:**
+- Given the Noise Gate is at its default level
+- When the level is requested
+- Then the response reports 0%
+
+**Completion promise:** `SLICE_28_DONE`
+**Depends on:** Slice 26
+**Status:** todo
+
+## Slice 29 — Noise gate slider appears on the page  _(Component: Noise Gate UI)_
+
+**Goal:** Render a noise gate slider on the page reflecting the current level, alongside (not replacing) Master Volume and Voice selection.
+
+**Verification:**
+- Given the page is opened
+- When it loads
+- Then a noise gate slider is shown, positioned at the current Noise Gate level
+
+**Completion promise:** `SLICE_29_DONE`
+**Depends on:** Slice 28
+**Status:** todo
+
+## Slice 30 — Set noise gate level  _(Component: Noise Gate API)_
+
+**Goal:** Let a request set the Noise Gate level, clamped to the valid 0-100% range.
+
+**Verification:**
+- Given a request sets the Noise Gate to a specific level within the valid range
+- When the level is read back
+- Then it reflects the new level
+
+**Completion promise:** `SLICE_30_DONE`
+**Depends on:** Slice 29, Slice 26
+**Status:** todo
+
+## Slice 31 — Dragging the noise gate slider updates the level  _(Component: Noise Gate UI)_
+
+**Goal:** Let moving the noise gate slider on the page set the Noise Gate level live.
+
+**Verification:**
+- Given the noise gate slider is shown on the page
+- When it is moved to a new level
+- Then the new level is sent to set the Noise Gate
+
+**Completion promise:** `SLICE_31_DONE`
+**Depends on:** Slice 30, Slice 29
+**Status:** todo
+
+---
+
+# Band 7 — LLVC feasibility spike
+> **Mini-MVP:** A recorded, evidence-based answer to "is LLVC viable for this project," backed by real installation and timing data from this desktop machine — not a shipped feature. See ADR 0003 for context. Unlike Bands 1-6, these are investigative spikes, not TDD feature slices: a slice ending "blocked" with clearly recorded findings is a legitimate, expected outcome here, not a failure. Deliberately sequenced last — see the conversation around ADR 0003 for why (no other Band depends on this, and isolating a heavy new dependency stack like PyTorch is cleanest done once the DSP work is stable).
+
+## Slice 32 — LLVC installs in an isolated environment  _(Component: ML Voice Spike)_
 
 **Goal:** Determine whether LLVC's dependencies install successfully in an isolated environment, resolving the Python 3.9-vs-3.11 question (ADR 0003) empirically rather than by assumption.
 
@@ -367,45 +450,45 @@
 - When LLVC's dependencies are installed per its own repository instructions
 - Then the outcome (success, or the exact failure) is recorded for Python 3.9, and for Python 3.11 if 3.9 fails
 
-**Completion promise:** `SLICE_26_DONE`
+**Completion promise:** `SLICE_32_DONE`
 **Depends on:** none
 **Status:** todo
 
-## Slice 27 — LLVC offline inference smoke test  _(Component: ML Voice Spike)_
+## Slice 33 — LLVC offline inference smoke test  _(Component: ML Voice Spike)_
 
 **Goal:** Run LLVC's offline `infer.py` against a short sample audio clip and measure wall-clock conversion time on this desktop machine.
 
 **Verification:**
-- Given LLVC installed (Slice 26) and a short sample audio clip
+- Given LLVC installed (Slice 32) and a short sample audio clip
 - When `infer.py` is run against it using a pretrained checkpoint
 - Then the conversion completes and the measured time, compared to the clip's duration, produces a real-time factor for this desktop machine
 
-**Completion promise:** `SLICE_27_DONE`
-**Depends on:** Slice 26
+**Completion promise:** `SLICE_33_DONE`
+**Depends on:** Slice 32
 **Status:** todo
 
-## Slice 28 — LLVC simulated-streaming latency measurement  _(Component: ML Voice Spike)_
+## Slice 34 — LLVC simulated-streaming latency measurement  _(Component: ML Voice Spike)_
 
 **Goal:** Measure per-chunk latency using LLVC's simulated-streaming mode, as the closest available proxy for real-time feasibility before Raspberry Pi hardware exists.
 
 **Verification:**
-- Given LLVC installed (Slice 26)
+- Given LLVC installed (Slice 32)
 - When its simulated-streaming inference mode (the `-s` flag) is run against a sample input
-- Then per-chunk latency is measured and recorded, and compared against this project's established real-time budget (the ~64ms budget from CLAUDE.md's Real-time performance notes) as an optimistic desktop-class upper bound — not a Pi-equivalent result
+- Then per-chunk latency is measured and recorded, and compared against this project's established real-time budget (the ~139ms budget from CLAUDE.md's Real-time performance notes) as an optimistic desktop-class upper bound — not a Pi-equivalent result
 
-**Completion promise:** `SLICE_28_DONE`
-**Depends on:** Slice 26
+**Completion promise:** `SLICE_34_DONE`
+**Depends on:** Slice 32
 **Status:** todo
 
-## Slice 29 — Record findings in ADR 0003  _(Component: ML Voice Spike)_
+## Slice 35 — Record findings in ADR 0003  _(Component: ML Voice Spike)_
 
-**Goal:** Synthesize Slices 26-28's findings into ADR 0003 and CONTEXT.md, replacing "unverified" with measured numbers and a concrete recommendation on whether to pursue LLVC further.
+**Goal:** Synthesize Slices 33-34's findings into ADR 0003 and CONTEXT.md, replacing "unverified" with measured numbers and a concrete recommendation on whether to pursue LLVC further.
 
 **Verification:**
-- Given the recorded findings from Slices 26-28
+- Given the recorded findings from Slices 33-34
 - When ADR 0003 and CONTEXT.md's LLVC scoping note are updated
 - Then they state the actual measured installation outcome, real-time factor, and simulated-streaming latency, with an explicit recommendation (proceed to real Pi hardware testing once purchased, or abandon the LLVC direction) instead of the current placeholder language
 
-**Completion promise:** `SLICE_29_DONE`
-**Depends on:** Slice 27, Slice 28
+**Completion promise:** `SLICE_35_DONE`
+**Depends on:** Slice 33, Slice 34
 **Status:** todo
