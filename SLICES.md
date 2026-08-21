@@ -154,7 +154,7 @@
 
 **Completion promise:** `SLICE_11_DONE`
 **Depends on:** Slice 1
-**Status:** todo
+**Status:** done
 
 ## Slice 12 — Deep Voice  _(Component: Voice Bank)_
 

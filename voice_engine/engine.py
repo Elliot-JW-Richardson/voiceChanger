@@ -4,25 +4,20 @@ An Effect Step (see CONTEXT.md) is one entry in a DSP Voice's chain: an
 effect type plus its parameters. A DSP Voice is an ordered list of Effect
 Steps applied in sequence to each audio block.
 
-This slice establishes only the chain-processing mechanism itself and
-proves the empty-chain (Passthrough Voice) identity case: no Effect Step
-types exist yet, so `steps` is expected to be an empty list for now. Later
-slices add concrete step types; each step is expected to be a callable
-that takes a block and returns the processed block, so the loop below is
-already correct for non-empty chains without further changes.
-
 `CompileChain` bridges a Voice's DECLARATIVE chain (`EffectStep` data --
 see `voice_engine.voice`) to the compiled, callable form `ProcessChain`
-expects. No concrete Effect Step types exist yet (pitch shift, ring
-modulation, etc. arrive in later slices, 11 onward), so there is nothing
-to dispatch on yet -- it only needs to correctly compile an empty chain
-to an empty compiled list. The loop is kept in place so later slices can
-add per-type compilation without restructuring this function.
+expects. Slice 11 adds the first concrete Effect Step type, pitch shift
+(via `pedalboard`), which needs the stream's sample rate to shift
+correctly -- hence `CompileChain` takes `sampleRate` and bakes it into
+the closures it builds for steps that need it. Remaining palette types
+(ring modulation, distortion/bitcrush, EQ, reverb) arrive in later
+slices, 13 onward, and still raise `NotImplementedError` until then.
 """
 from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
+from pedalboard import Pedalboard, PitchShift
 
 from voice_engine.voice import EffectStep
 
@@ -33,19 +28,54 @@ AudioBlock = NDArray[np.float32]
 CompiledEffectStep = Callable[[AudioBlock], AudioBlock]
 
 
-def CompileChain(chain: list[EffectStep]) -> list[CompiledEffectStep]:
+def CompilePitchShiftStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `pitch_shift` Effect Step into a callable that runs a
+    block through `pedalboard.PitchShift`.
+
+    `pedalboard.Pedalboard.process()` needs a sample rate to shift pitch
+    correctly, so `sampleRate` is baked into the returned closure at
+    compile time. No cross-block streaming state is kept (see SLICES.md,
+    Slice 11's scope notes) -- each call builds a fresh `Pedalboard`,
+    which is simple and sufficient since pitch shift has no phase-
+    continuity requirement across blocks (unlike ring modulation,
+    Slice 13).
+
+    This project's `AudioBlock` convention -- (frames, channels) float32,
+    matching sounddevice's indata/outdata -- is also the shape
+    `pedalboard.Pedalboard.process()` auto-detects as (samples, channels)
+    for mono (channels=1, the only case this project uses), so no shape
+    conversion is needed either way: the block goes in and comes back out
+    in the same (frames, channels) layout.
+    """
+    semitones = step.params["semitones"]
+
+    def PitchShiftStep(block: AudioBlock) -> AudioBlock:
+        pedalboardChain = Pedalboard([PitchShift(semitones=semitones)])
+        shiftedBlock = pedalboardChain.process(block, sampleRate)
+        return shiftedBlock.astype(np.float32)
+
+    return PitchShiftStep
+
+
+def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
 
-    No concrete Effect Step types exist yet, so there is no per-type
-    dispatch here -- only an empty `chain` is handled for now, which
-    correctly compiles to an empty list of compiled steps. Later slices
-    are expected to extend the loop body to compile each concrete
-    Effect Step type as it's introduced.
+    sampleRate: the audio stream's sample rate in Hz, needed by Effect
+        Step types (e.g. pitch shift) whose underlying DSP depends on it.
+
+    Dispatches by each step's `type`; `pitch_shift` is the only concrete
+    type handled so far (Slice 11). Any other type raises
+    `NotImplementedError`, exactly as before Slice 11 -- ring modulation,
+    distortion/bitcrush, EQ, and reverb arrive in later slices (13, 14,
+    17, 18).
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
-        raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
+        if step.type == "pitch_shift":
+            compiledSteps.append(CompilePitchShiftStep(step, sampleRate))
+        else:
+            raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps
 
 

@@ -32,7 +32,7 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
     # runs on sounddevice's own real-time audio thread, not the Flask
     # request thread (see CLAUDE.md's Architecture notes).
     activeVoice = ACTIVE_VOICE_HOLDER.Get()
-    compiledChain = CompileChain(activeVoice.chain)
+    compiledChain = CompileChain(activeVoice.chain, SAMPLE_RATE)
     outdata[:] = ProcessChain(compiledChain, indata)
 
 
