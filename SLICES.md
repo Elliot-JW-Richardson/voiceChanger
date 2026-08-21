@@ -58,7 +58,7 @@
 
 **Completion promise:** `SLICE_4_DONE`
 **Depends on:** Slice 3
-**Status:** todo
+**Status:** done
 
 ## Slice 5 — Active Voice holder  _(Component: Runtime)_
 
