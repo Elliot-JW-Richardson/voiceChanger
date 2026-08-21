@@ -10,7 +10,7 @@ Verified in the frequency domain: a pure sine wave of a known frequency
 is run through a compiled pitch-shift step, and the dominant frequency of
 the output (found via `numpy.fft.rfft`) is checked against the
 expected shifted frequency (`inputFrequency * 2 ** (semitones / 12)`).
-A block considerably longer than the live callback's BLOCKSIZE (1024,
+A block considerably longer than the live callback's BLOCKSIZE (8192,
 see app.py) is used for adequate FFT bin resolution --
 `ProcessChain`/`CompileChain` aren't hardcoded to any particular block
 size, so this is safe to do outside the real-time path.
