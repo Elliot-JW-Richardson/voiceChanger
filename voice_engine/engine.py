@@ -63,7 +63,7 @@ def CompilePitchShiftStep(step: EffectStep, sampleRate: int) -> CompiledEffectSt
     of `reset=True` is that each block's pitch-shift processing doesn't
     carry state across the block boundary, which could in principle cause
     small block-edge artifacts -- not covered by this slice's acceptance
-    criteria (see SLICES.md, Slice 11), unlike ring modulation's Slice 13,
+    criteria (see SLICES.md, Slice 11), unlike ring modulation's Slice 19,
     which explicitly tests phase continuity.
 
     This project's `AudioBlock` convention -- (frames, channels) float32,
