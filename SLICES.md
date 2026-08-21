@@ -123,7 +123,7 @@
 
 **Completion promise:** `SLICE_9_DONE`
 **Depends on:** Slice 8, Slice 5
-**Status:** todo
+**Status:** done
 
 ## Slice 10 — Selecting a Voice from the page  _(Component: Voice Selection UI)_
 

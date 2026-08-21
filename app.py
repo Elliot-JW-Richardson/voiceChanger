@@ -25,8 +25,6 @@ ACTIVE_VOICE_HOLDER = ActiveVoiceHolder(VOICE_BANK)
 
 audio_stream = None  # global handle to the stream
 
-current_pitch_semitones = 0.0
-
 def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: Any, status: sd.CallbackFlags) -> None:
     if status:
         print("Status:", status)
@@ -50,17 +48,12 @@ def ListVoices():
     activeVoiceId = ACTIVE_VOICE_HOLDER.Get().id
     return jsonify({"voices": voices, "activeVoiceId": activeVoiceId})
 
-@app.route("/update_pitch", methods=["POST"])
-def update_pitch():
-
-    global current_pitch_semitones
-
-    data = request.get_json()
-
-    if 'pitch' in data:
-        print(data.get('pitch'))
-        current_pitch_semitones = data.get('pitch')
-    return jsonify({"status": "ok", "pitch": current_pitch_semitones})
+@app.route("/voices/select", methods=["POST"])
+def SelectVoice():
+    requestedId = request.get_json()["id"]
+    selectedVoice = next(voice for voice in VOICE_BANK.voices if voice.id == requestedId)
+    ACTIVE_VOICE_HOLDER.Set(selectedVoice)
+    return jsonify({"status": "ok", "activeVoiceId": selectedVoice.id})
 
 @app.route("/start", methods=["POST"])
 def start_stream():
