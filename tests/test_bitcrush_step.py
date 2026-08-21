@@ -64,3 +64,34 @@ def test_BitcrushStepQuantizesSmoothSignalToFewDistinctValues() -> None:
     # The key point: quantization visibly occurred -- drastically fewer
     # distinct values than the smooth input had.
     assert distinctOutputValues < distinctInputValues / 100
+
+
+def test_BitcrushStepStaysReasonablyIntelligibleOnQuietRealisticInput() -> None:
+    # Regression test: pedalboard.Bitcrush quantizes in FIXED steps across
+    # the full [-1, 1] range, not relative to the signal's own amplitude.
+    # A bit_depth tuned against a full-scale test tone (like the test
+    # above) can collapse a QUIET real microphone signal to only a
+    # handful of distinct values -- heard as buzzy squeaks, not a voice.
+    # This bit the shipped Magos Voice for real (see voices/magos.yaml's
+    # comments and git history): bit_depth=5 gave only 3-4 distinct output
+    # values at a realistic quiet amplitude. bit_depth=10 (what Magos uses
+    # now) is checked here against a quiet amplitude and must retain
+    # meaningfully more resolution than that.
+    sampleRate = 16000
+    frameCount = 2000
+    quietAmplitude = 0.05  # representative of this project's known-quiet mic input
+    bitDepth = 10
+
+    time = np.arange(frameCount, dtype=np.float32) / sampleRate
+    quietSineWave = (quietAmplitude * np.sin(2 * np.pi * 180 * time)).astype(np.float32)
+    block = quietSineWave.reshape(-1, 1)
+
+    chain = [EffectStep(type="bitcrush", params={"bit_depth": bitDepth})]
+    compiledChain = CompileChain(chain, sampleRate)
+    result = ProcessChain(compiledChain, block)
+
+    distinctOutputValues = len(np.unique(result))
+
+    # bit_depth=5 collapsed to 3-4 values at this amplitude; bit_depth=10
+    # must do meaningfully better, not just marginally.
+    assert distinctOutputValues >= 30
