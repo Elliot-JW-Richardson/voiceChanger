@@ -9,9 +9,11 @@ see `voice_engine.voice`) to the compiled, callable form `ProcessChain`
 expects. Slice 11 adds the first concrete Effect Step type, pitch shift
 (via `pedalboard`), which needs the stream's sample rate to shift
 correctly -- hence `CompileChain` takes `sampleRate` and bakes it into
-the closures it builds for steps that need it. Remaining palette types
-(ring modulation, distortion/bitcrush, EQ, reverb) arrive in later
-slices, 13 onward, and still raise `NotImplementedError` until then.
+the closures it builds for steps that need it. Slice 19 adds the second
+concrete type, ring modulation (a trivial custom oscillator multiply --
+`pedalboard` doesn't provide it). Remaining palette types
+(distortion/bitcrush, EQ, reverb) arrive in later slices, 20 onward, and
+still raise `NotImplementedError` until then.
 
 IMPORTANT for anyone adding a new Effect Step type: any expensive setup
 (e.g. constructing a `pedalboard.Pedalboard`/plugin instance) MUST happen
@@ -81,6 +83,39 @@ def CompilePitchShiftStep(step: EffectStep, sampleRate: int) -> CompiledEffectSt
     return PitchShiftStep
 
 
+def CompileRingModStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `ring_mod` Effect Step into a callable that multiplies a
+    block by a sine oscillator (see CONTEXT.md's Effect palette entry:
+    "multiplies the signal by a sine oscillator", a trivial custom DSP
+    implementation -- unlike the rest of the palette, `pedalboard` doesn't
+    provide ring modulation).
+
+    Unlike `CompilePitchShiftStep` (stateless across calls -- each block
+    is processed independently via `reset=True`), the oscillator here
+    MUST carry its phase continuously across successive calls to the
+    returned closure (Slice 19's acceptance criteria): the running time
+    `phaseSeconds` is captured by the closure and advanced by
+    `framesInBlock / sampleRate` on every call via `nonlocal`, so the next
+    call's oscillator picks up exactly where the previous one left off
+    instead of restarting at t=0.
+
+    No clipping is needed -- multiplying a signal already in [-1.0, 1.0]
+    by an oscillator also in [-1.0, 1.0] can't exceed [-1.0, 1.0].
+    """
+    frequency = step.params["frequency"]
+    phaseSeconds = 0.0
+
+    def RingModStep(block: AudioBlock) -> AudioBlock:
+        nonlocal phaseSeconds
+        framesInBlock = block.shape[0]
+        time = phaseSeconds + np.arange(framesInBlock, dtype=np.float64) / sampleRate
+        oscillator = np.sin(2 * np.pi * frequency * time).astype(np.float32)
+        phaseSeconds += framesInBlock / sampleRate
+        return block * oscillator.reshape(-1, 1)
+
+    return RingModStep
+
+
 def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
@@ -88,16 +123,17 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
     sampleRate: the audio stream's sample rate in Hz, needed by Effect
         Step types (e.g. pitch shift) whose underlying DSP depends on it.
 
-    Dispatches by each step's `type`; `pitch_shift` is the only concrete
-    type handled so far (Slice 11). Any other type raises
-    `NotImplementedError`, exactly as before Slice 11 -- ring modulation,
-    distortion/bitcrush, EQ, and reverb arrive in later slices (13, 14,
-    17, 18).
+    Dispatches by each step's `type`; `pitch_shift` (Slice 11) and
+    `ring_mod` (Slice 19) are the concrete types handled so far. Any
+    other type raises `NotImplementedError` -- distortion/bitcrush, EQ,
+    and reverb arrive in later slices (20, 23, 24).
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
         if step.type == "pitch_shift":
             compiledSteps.append(CompilePitchShiftStep(step, sampleRate))
+        elif step.type == "ring_mod":
+            compiledSteps.append(CompileRingModStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps
