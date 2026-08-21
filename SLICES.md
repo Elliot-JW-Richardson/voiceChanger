@@ -237,7 +237,7 @@
 
 **Completion promise:** `SLICE_17_DONE`
 **Depends on:** Slice 16, Slice 13
-**Status:** todo
+**Status:** done
 
 ## Slice 18 — Dragging the slider updates volume  _(Component: Master Volume UI)_
 
