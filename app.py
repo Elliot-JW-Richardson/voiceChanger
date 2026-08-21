@@ -1,7 +1,14 @@
+from pathlib import Path
+from typing import Any
+
 import sounddevice as sd
 from flask import Flask, jsonify, send_from_directory, request
 import librosa
 import numpy as np
+
+from voice_engine.bank import LoadVoiceBank
+from voice_engine.engine import AudioBlock, CompileChain, ProcessChain
+from voice_engine.runtime import ActiveVoiceHolder
 
 app = Flask(__name__)
 
@@ -9,15 +16,27 @@ SAMPLE_RATE = 48000
 BLOCKSIZE = 1024
 CHANNELS = 1
 
+# Loaded relative to this file's own location (not the current working
+# directory) so it works regardless of where the process is launched
+# from -- same technique tests/test_passthrough_voice.py uses.
+VOICES_DIRECTORY_PATH = Path(__file__).parent / "voices"
+VOICE_BANK = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
+ACTIVE_VOICE_HOLDER = ActiveVoiceHolder(VOICE_BANK)
+
 audio_stream = None  # global handle to the stream
 
 current_pitch_semitones = 0.0
 
-def audio_callback(indata, outdata, frames, time, status):
+def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: Any, status: sd.CallbackFlags) -> None:
     if status:
         print("Status:", status)
-    # Directly copy microphone input to speakers/headphones
-    outdata[:] = indata
+    # Route microphone input through the currently active Voice's chain
+    # rather than copying it straight to speakers/headphones. Note: this
+    # runs on sounddevice's own real-time audio thread, not the Flask
+    # request thread (see CLAUDE.md's Architecture notes).
+    activeVoice = ACTIVE_VOICE_HOLDER.Get()
+    compiledChain = CompileChain(activeVoice.chain)
+    outdata[:] = ProcessChain(compiledChain, indata)
 
 
 @app.route("/")
@@ -51,7 +70,7 @@ def start_stream():
         blocksize=BLOCKSIZE,
         channels=CHANNELS,
         dtype="float32",
-        callback=audio_callback,
+        callback=AudioCallback,
     )
     audio_stream.start()
     return jsonify({"status": "started"})

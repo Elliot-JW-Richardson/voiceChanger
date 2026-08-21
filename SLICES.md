@@ -84,7 +84,7 @@
 
 **Completion promise:** `SLICE_6_DONE`
 **Depends on:** Slice 5, Slice 1
-**Status:** todo
+**Status:** done
 
 ## Slice 7 — List available Voices  _(Component: Voice Selection API)_
 
