@@ -189,7 +189,7 @@
 
 ## Slice 14 — Live audio gain applied via Master Volume  _(Component: Runtime)_
 
-**Goal:** Scale the live audio callback's output by the Master Volume level (0-200%), clipping to the valid audio range to prevent distortion when boosting.
+**Goal:** Scale the live audio callback's output by the Master Volume level (originally 0-200%, later raised to 0-400% after real-world testing — see CONTEXT.md), clipping to the valid audio range to prevent distortion when boosting.
 
 **Verification:**
 - Given the Master Volume is set to a level that would push a loud block's samples beyond the valid [-1, 1] range
@@ -228,7 +228,7 @@
 
 ## Slice 17 — Set volume  _(Component: Master Volume API)_
 
-**Goal:** Let a request set the Master Volume level, clamped to the valid 0-200% range.
+**Goal:** Let a request set the Master Volume level, clamped to the valid range (originally 0-200%, later raised to 0-400% after real-world testing — see CONTEXT.md).
 
 **Verification:**
 - Given a request sets the Master Volume to a specific level within the valid range

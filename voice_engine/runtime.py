@@ -49,7 +49,7 @@ class ActiveVoiceHolder:
 
 
 class MasterVolumeHolder:
-    """Holds the single global Master Volume level (a percentage, 0-200%,
+    """Holds the single global Master Volume level (a percentage, 0-400%,
     100% = unity gain -- see CONTEXT.md's Master Volume entry), guarded by
     a lock so it can be safely read and set from different threads.
 
