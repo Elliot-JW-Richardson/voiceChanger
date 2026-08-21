@@ -44,6 +44,12 @@ def index():
     # Serve the HTML page from the same directory
     return send_from_directory(".", "index.html")
 
+@app.route("/voices", methods=["GET"])
+def ListVoices():
+    voices = [{"id": voice.id, "name": voice.name} for voice in VOICE_BANK.voices]
+    activeVoiceId = ACTIVE_VOICE_HOLDER.Get().id
+    return jsonify({"voices": voices, "activeVoiceId": activeVoiceId})
+
 @app.route("/update_pitch", methods=["POST"])
 def update_pitch():
 

@@ -97,7 +97,7 @@
 
 **Completion promise:** `SLICE_7_DONE`
 **Depends on:** Slice 6, Slice 4
-**Status:** todo
+**Status:** done
 
 ## Slice 8 — Voice list appears on the page  _(Component: Voice Selection UI)_
 
