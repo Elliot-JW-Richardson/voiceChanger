@@ -294,7 +294,7 @@
 
 **Completion promise:** `SLICE_21_DONE`
 **Depends on:** Slice 19, Slice 20
-**Status:** todo
+**Status:** done
 
 ## Slice 22 — Magos Voice  _(Component: Voice Bank)_
 
