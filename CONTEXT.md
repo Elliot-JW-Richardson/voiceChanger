@@ -26,6 +26,9 @@ The set of Effect Step types the engine supports: **pitch shift**, **ring modula
 
 **Formant shift** (alters vocal-tract resonance independent of pitch) is a recognized future effect type, deferred out of v1: it has no drop-in real-time implementation (classically LPC or phase-vocoder based) and doesn't fit the small-buffer live-callback model the rest of the palette is built around. Revisit once the Voice Bank architecture is proven end-to-end.
 
+### Master Volume
+A single global gain control applied to the live audio output after a Voice's Effect Step chain, independent of which Voice is active — not a Voice, not an Effect Step, and not per-Voice. Chosen deliberately (see ADR 0002) after real-hardware testing reported the output as too quiet: a general "the whole thing is too quiet" problem is best solved by one control reachable regardless of which Voice is selected, rather than requiring every current and future Voice to individually compensate for it. Represented as a percentage, 0-200% (100% = unity gain, unchanged output); output is clipped to the valid audio range after scaling, since boosting above 100% can otherwise push samples outside the range a speaker can represent, causing digital distortion.
+
 ## Deployment scope
 
 Development and testing happen on the desktop (Windows) for now. The eventual target is a small, cheap, standalone SBC (Raspberry Pi Zero 2 W is the current front-runner, not yet purchased/committed) mounted in a cosplay headpiece, running headless with the audio stream auto-starting on boot and voice selection done via phone browser over the Pi's own WiFi AP. Hardware selection and porting are deferred — not part of this overhaul.
@@ -38,6 +41,7 @@ A separate servo-skull computer-vision project was raised and explicitly ruled *
 - A **DSP Voice** is composed of an ordered list of **Effect Steps**; the list may be empty (the **Passthrough Voice**).
 - The manual pitch slider (`/update_pitch`, `current_pitch_semitones`) is retired entirely once Voices ship. Voice selection is the only control surface — no raw pitch value floating independent of a selected Voice.
 - Switching the active Voice is expected to produce a brief audible glitch (effect state resets); seamless crossfade between Voices is explicitly not a goal.
+- **Master Volume** applies after whichever Voice is active; it is not part of any Voice's chain and is unaffected by switching Voices.
 
 ## Example dialogue
 
