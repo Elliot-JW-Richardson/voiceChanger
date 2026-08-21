@@ -5,8 +5,8 @@ import sounddevice as sd
 from flask import Flask, Response, jsonify, send_from_directory, request
 
 from voice_engine.bank import LoadVoiceBank
-from voice_engine.engine import AudioBlock, CompiledChainCache, ProcessChain
-from voice_engine.runtime import ActiveVoiceHolder
+from voice_engine.engine import ApplyMasterVolume, AudioBlock, CompiledChainCache, ProcessChain
+from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder
 
 app = Flask(__name__)
 
@@ -28,6 +28,7 @@ CHANNELS = 1
 VOICES_DIRECTORY_PATH = Path(__file__).parent / "voices"
 VOICE_BANK = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 ACTIVE_VOICE_HOLDER = ActiveVoiceHolder(VOICE_BANK)
+MASTER_VOLUME_HOLDER = MasterVolumeHolder()
 COMPILED_CHAIN_CACHE = CompiledChainCache(SAMPLE_RATE)
 
 AUDIO_STREAM: Optional[sd.Stream] = None  # global handle to the stream
@@ -45,7 +46,13 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
     # only recompiles when the active Voice actually changes.
     activeVoice = ACTIVE_VOICE_HOLDER.Get()
     compiledChain = COMPILED_CHAIN_CACHE.Get(activeVoice)
-    outdata[:] = ProcessChain(compiledChain, indata)
+    processedBlock = ProcessChain(compiledChain, indata)
+    # Master Volume (see CONTEXT.md) is a single global gain applied
+    # AFTER the Voice's Effect Step chain, independent of which Voice is
+    # active -- not a Voice, not an Effect Step, so it's applied here
+    # rather than folded into COMPILED_CHAIN_CACHE/ProcessChain above.
+    masterVolumeLevel = MASTER_VOLUME_HOLDER.Get()
+    outdata[:] = ApplyMasterVolume(processedBlock, masterVolumeLevel)
 
 
 @app.route("/")

@@ -128,6 +128,28 @@ class CompiledChainCache:
         return self.cachedChain
 
 
+def ApplyMasterVolume(block: AudioBlock, level: int) -> AudioBlock:
+    """Scale a block of audio by the Master Volume level (see CONTEXT.md's
+    Master Volume entry and ADR 0002), clipping the result to the valid
+    [-1.0, 1.0] audio range.
+
+    level: a percentage, 0-200 (100 = unity gain, unchanged output),
+        as tracked by `voice_engine.runtime.MasterVolumeHolder`.
+
+    Deliberately separate from the Effect Step chain machinery above --
+    Master Volume is a single global control applied AFTER a Voice's
+    Effect Step chain, independent of which Voice is active; it is not
+    itself an Effect Step and has no entry in `CompileChain`'s dispatch.
+
+    Clipping (via `np.clip`) is what prevents boosting above 100% from
+    pushing samples outside the range a speaker can represent -- without
+    it, a loud block scaled above unity gain could produce values outside
+    [-1.0, 1.0], causing digital distortion.
+    """
+    scaledBlock = block * (level / 100.0)
+    return np.clip(scaledBlock, -1.0, 1.0).astype(np.float32)
+
+
 def ProcessChain(steps: list[CompiledEffectStep], block: AudioBlock) -> AudioBlock:
     """Apply an ordered list of compiled Effect Steps to a block of audio.
 

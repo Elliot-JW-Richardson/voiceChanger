@@ -198,7 +198,7 @@
 
 **Completion promise:** `SLICE_14_DONE`
 **Depends on:** Slice 13, Slice 6
-**Status:** todo
+**Status:** done
 
 ## Slice 15 — Get current volume  _(Component: Master Volume API)_
 
