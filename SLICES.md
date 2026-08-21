@@ -171,10 +171,93 @@
 
 ---
 
-# Band 3 — The flagship robotic character: Magos Voice
+# Band 3 — Master Volume control
+> **Mini-MVP:** Drag the volume slider on the page and hear the output get quieter or louder live, no matter which Voice is selected. Added out of plan order after real-hardware testing of Deep Voice reported the output as too quiet (see ADR 0002); prioritized ahead of Bands 4-5 at the user's request.
+
+## Slice 13 — Master Volume holder  _(Component: Runtime)_
+
+**Goal:** Track a single global Master Volume level, safely readable and settable, defaulting to 100% (unchanged output).
+
+**Verification:**
+- Given the Master Volume holder is initialized
+- When it is read before any change, and then set to a different level and read again
+- Then the first read reports 100%, and the second read reports the newly set level
+
+**Completion promise:** `SLICE_13_DONE`
+**Depends on:** none
+**Status:** todo
+
+## Slice 14 — Live audio gain applied via Master Volume  _(Component: Runtime)_
+
+**Goal:** Scale the live audio callback's output by the Master Volume level (0-200%), clipping to the valid audio range to prevent distortion when boosting.
+
+**Verification:**
+- Given the Master Volume is set to a level that would push a loud block's samples beyond the valid [-1, 1] range
+- When that block is processed
+- Then the output is scaled by the volume level and clipped so no sample exceeds [-1, 1]
+
+**Completion promise:** `SLICE_14_DONE`
+**Depends on:** Slice 13, Slice 6
+**Status:** todo
+
+## Slice 15 — Get current volume  _(Component: Master Volume API)_
+
+**Goal:** Expose the current Master Volume level over HTTP.
+
+**Verification:**
+- Given the Master Volume is at its default level
+- When the volume is requested
+- Then the response reports 100%
+
+**Completion promise:** `SLICE_15_DONE`
+**Depends on:** Slice 13
+**Status:** todo
+
+## Slice 16 — Volume slider appears on the page  _(Component: Master Volume UI)_
+
+**Goal:** Render a volume slider on the page reflecting the current Master Volume level, alongside (not replacing) Voice selection.
+
+**Verification:**
+- Given the page is opened
+- When it loads
+- Then a volume slider is shown, positioned at the current Master Volume level
+
+**Completion promise:** `SLICE_16_DONE`
+**Depends on:** Slice 15
+**Status:** todo
+
+## Slice 17 — Set volume  _(Component: Master Volume API)_
+
+**Goal:** Let a request set the Master Volume level, clamped to the valid 0-200% range.
+
+**Verification:**
+- Given a request sets the Master Volume to a specific level within the valid range
+- When the volume is read back
+- Then it reflects the new level
+
+**Completion promise:** `SLICE_17_DONE`
+**Depends on:** Slice 16, Slice 13
+**Status:** todo
+
+## Slice 18 — Dragging the slider updates volume  _(Component: Master Volume UI)_
+
+**Goal:** Let moving the volume slider on the page set the Master Volume live.
+
+**Verification:**
+- Given the volume slider is shown on the page
+- When it is moved to a new level
+- Then the new level is sent to set the Master Volume
+
+**Completion promise:** `SLICE_18_DONE`
+**Depends on:** Slice 17, Slice 16
+**Status:** todo
+
+---
+
+# Band 4 — The flagship robotic character: Magos Voice
 > **Mini-MVP:** Select "Magos" on the page and hear a pitched-down, robotic, distorted voice live — the flagship cosplay character voice.
 
-## Slice 13 — Ring modulation Effect Step  _(Component: Effect Engine)_
+## Slice 19 — Ring modulation Effect Step  _(Component: Effect Engine)_
 
 **Goal:** Add ring modulation (metallic/robotic buzz) as a usable Effect Step, with its oscillator phase carrying continuously across successive blocks.
 
@@ -183,11 +266,11 @@
 - When two consecutive blocks of audio are processed through it
 - Then the oscillator's phase at the start of the second block continues seamlessly from where it left off at the end of the first, with no discontinuity at the boundary
 
-**Completion promise:** `SLICE_13_DONE`
+**Completion promise:** `SLICE_19_DONE`
 **Depends on:** Slice 1
 **Status:** todo
 
-## Slice 14 — Distortion/bitcrush Effect Step  _(Component: Effect Engine)_
+## Slice 20 — Distortion/bitcrush Effect Step  _(Component: Effect Engine)_
 
 **Goal:** Add distortion/bitcrush as a usable Effect Step for adding grit to a Voice.
 
@@ -196,11 +279,11 @@
 - When a smooth block of audio is processed through it
 - Then the output contains only the limited number of distinct sample values that bit depth allows, confirming quantization occurred
 
-**Completion promise:** `SLICE_14_DONE`
+**Completion promise:** `SLICE_20_DONE`
 **Depends on:** Slice 1
 **Status:** todo
 
-## Slice 15 — Effect Steps compose in declared order  _(Component: Effect Engine)_
+## Slice 21 — Effect Steps compose in declared order  _(Component: Effect Engine)_
 
 **Goal:** Confirm a chain of multiple different Effect Steps applies them in the order declared, not some other order.
 
@@ -209,11 +292,11 @@
 - When a block of audio is processed through it
 - Then the result matches applying ring modulation first and bitcrush second, and differs from applying them in the reverse order
 
-**Completion promise:** `SLICE_15_DONE`
-**Depends on:** Slice 13, Slice 14
+**Completion promise:** `SLICE_21_DONE`
+**Depends on:** Slice 19, Slice 20
 **Status:** todo
 
-## Slice 16 — Magos Voice  _(Component: Voice Bank)_
+## Slice 22 — Magos Voice  _(Component: Voice Bank)_
 
 **Goal:** Ship the Warhammer 40K Magos-style Voice — pitch shift, ring modulation, and distortion chained together — as a selectable Voice.
 
@@ -222,16 +305,16 @@
 - When the Voice Bank is loaded
 - Then Magos appears with its full pitch-shift, ring-modulation, and distortion chain in the declared order, and is selectable and becomes active exactly like any other Voice
 
-**Completion promise:** `SLICE_16_DONE`
-**Depends on:** Slice 15, Slice 11
+**Completion promise:** `SLICE_22_DONE`
+**Depends on:** Slice 21, Slice 11
 **Status:** todo
 
 ---
 
-# Band 4 — Full palette and a third example Voice
+# Band 5 — Full palette and a third example Voice
 > **Mini-MVP:** The full effect palette (pitch shift, ring modulation, distortion, EQ, reverb) is available, and the Voice Bank ships three distinct example character voices alongside Passthrough — all switchable live from the page.
 
-## Slice 17 — EQ (shelf) Effect Step  _(Component: Effect Engine)_
+## Slice 23 — EQ (shelf) Effect Step  _(Component: Effect Engine)_
 
 **Goal:** Add a low/high shelf EQ as a usable Effect Step for shaping a Voice's tone.
 
@@ -240,11 +323,11 @@
 - When a block containing a frequency inside that band and one outside it is processed through it
 - Then the in-band frequency's amplitude increases relative to the out-of-band frequency's, compared to the unprocessed input
 
-**Completion promise:** `SLICE_17_DONE`
+**Completion promise:** `SLICE_23_DONE`
 **Depends on:** Slice 1
 **Status:** todo
 
-## Slice 18 — Reverb Effect Step  _(Component: Effect Engine)_
+## Slice 24 — Reverb Effect Step  _(Component: Effect Engine)_
 
 **Goal:** Add reverb as a usable Effect Step for spatial character.
 
@@ -253,11 +336,11 @@
 - When a short impulse of audio is processed through it
 - Then the output contains a decay tail extending beyond the impulse's original position
 
-**Completion promise:** `SLICE_18_DONE`
+**Completion promise:** `SLICE_24_DONE`
 **Depends on:** Slice 1
 **Status:** todo
 
-## Slice 19 — Radio Operator Voice  _(Component: Voice Bank)_
+## Slice 25 — Radio Operator Voice  _(Component: Voice Bank)_
 
 **Goal:** Ship a further example Voice combining EQ and reverb with existing effects, rounding out the example Voice Bank.
 
@@ -266,6 +349,6 @@
 - When the Voice Bank is loaded
 - Then Radio Operator appears with its declared chain including the EQ and reverb steps, and is selectable and becomes active exactly like any other Voice
 
-**Completion promise:** `SLICE_19_DONE`
-**Depends on:** Slice 17, Slice 18
+**Completion promise:** `SLICE_25_DONE`
+**Depends on:** Slice 23, Slice 24
 **Status:** todo
