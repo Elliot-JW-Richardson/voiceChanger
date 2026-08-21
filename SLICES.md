@@ -71,7 +71,7 @@
 
 **Completion promise:** `SLICE_5_DONE`
 **Depends on:** Slice 4
-**Status:** todo
+**Status:** done
 
 ## Slice 6 — Live audio routed through the active Voice  _(Component: Runtime)_
 
