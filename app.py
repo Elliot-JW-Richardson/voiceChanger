@@ -92,9 +92,9 @@ def SetVolume() -> Response:
     requestedLevel = request.get_json()["level"]
     # MasterVolumeHolder itself does no range validation (see its
     # docstring in voice_engine/runtime.py) -- clamping to the valid
-    # 0-200% range (see CONTEXT.md's Master Volume entry) is this
+    # 0-400% range (see CONTEXT.md's Master Volume entry) is this
     # route's job.
-    clampedLevel = max(0, min(200, requestedLevel))
+    clampedLevel = max(0, min(400, requestedLevel))
     MASTER_VOLUME_HOLDER.Set(clampedLevel)
     return jsonify({"status": "ok", "level": clampedLevel})
 
