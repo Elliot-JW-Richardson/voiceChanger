@@ -10,6 +10,8 @@ A named, switchable audio transformation applied to the live mic signal to chang
 
 Decision: this overhaul targets DSP Voices only, to avoid a GPU/ML dependency up front. ML Voices are a recognized future extension, not a current requirement.
 
+**Candidate engine (scoping only, not adopted):** [LLVC](https://github.com/KoeAI/LLVC) (MIT license) — CPU-only real-time voice conversion, sub-20ms inference latency claimed at 16kHz on a desktop CPU (arXiv:2311.00873). Attractive specifically because it needs no GPU, which was the original reason ML Voice was deferred. Not yet validated for this project — see ADR 0003 for the open prerequisites (Raspberry Pi performance unverified, Python version mismatch, heavy PyTorch dependency, and a real per-target-voice training-data requirement that reopens the IP-sourcing question DSP Voices were chosen partly to sidestep).
+
 ### Voice Bank
 The data-driven collection of available Voices. Each Voice is defined declaratively (not as hard-coded Python) as an ordered list of effect steps plus their parameters, loaded at runtime rather than compiled into the switching logic. This keeps adding/tuning voices independent of code changes and leaves room for a later entry to reference an ML engine instead of a DSP chain without restructuring how voices are selected.
 
