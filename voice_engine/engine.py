@@ -277,6 +277,18 @@ ENVELOPE_FOLLOWER_CUTOFF_HZ = 30.0
 # cascaded filter stages introduce -- see this function's docstring's
 # NORMALIZATION note for how this value was chosen.
 FILTER_BANK_MAKEUP_GAIN = 15.0
+# The unvoiced-branch noise carrier's amplitude (Slice 35) -- same order
+# of magnitude as the voiced branch's sawtooth `carrierAmplitude` (0.7)
+# so unvoiced output isn't wildly louder/quieter than voiced output; a
+# placeholder subject to future by-ear tuning, not precisely tuned yet
+# (see CompileVocoderStep's docstring's CARRIER, UNVOICED CASE note).
+NOISE_CARRIER_AMPLITUDE = 0.7
+# Constructed ONCE at module level (not per-block, not per-compile) and
+# reused across every call -- cheap enough to call per-block, but a fixed
+# per-block seed would make the "noise" identically repeat every block,
+# which is not how a real noise carrier should behave. See
+# CompileVocoderStep's docstring's CARRIER, UNVOICED CASE note.
+VOCODER_NOISE_CARRIER_RNG = np.random.default_rng()
 
 
 def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
@@ -292,13 +304,45 @@ def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     filter bank below spans several harmonics up into the low kHz range,
     not just the fundamental.
 
-    CARRIER (unchanged from Slice 33): `DetectPitch` (Slice 32) finds the
-    block's own fundamental every call, and a pitch-tracked sawtooth is
-    synthesized at that frequency with its phase reset each block (see
-    the historical version of this docstring, preserved in git history,
-    for the full reasoning -- SAWTOOTH-NOT-SINE, PHASE-RESETS-EVERY-BLOCK,
-    and UNVOICED FALLBACK all still apply exactly as before; that part of
-    this function's behavior is deliberately untouched by this slice).
+    CARRIER, VOICED CASE (unchanged from Slice 33): `DetectPitch` (Slice
+    32) finds the block's own fundamental every call, and a pitch-tracked
+    sawtooth is synthesized at that frequency with its phase reset each
+    block (see the historical version of this docstring, preserved in git
+    history, for the full reasoning -- SAWTOOTH-NOT-SINE and
+    PHASE-RESETS-EVERY-BLOCK both still apply exactly as before; that
+    part of this function's behavior is deliberately untouched by this
+    slice).
+
+    CARRIER, UNVOICED CASE (Slice 35): when `DetectPitch` reports `<= 0.0`
+    (silence, or no periodicity strong enough to clear
+    `pitch_tracker.MIN_PEAK_STRENGTH_RATIO` -- see that module's
+    docstring), the block is treated as UNVOICED (consonant-like input,
+    e.g. "s"/"f"/"sh", per this slice's goal) rather than voiced. No new
+    pitch-detection logic is needed here: `DetectPitch`'s existing
+    `<= 0.0` signal already IS the voiced/unvoiced decision, since its own
+    `MIN_PEAK_STRENGTH_RATIO` threshold is what makes genuine noise-like
+    input report 0.0 in the first place (verified directly against
+    `DetectPitch` in a scratch prototype -- see
+    tests/test_vocoder_step.py's `test_VocoderStepUsesNoiseCarrierForUnvoicedInputButSawtoothForPitchedInput`
+    docstring). Instead of synthesizing a sawtooth, a WHITE NOISE carrier
+    is drawn from `VOCODER_NOISE_CARRIER_RNG` (a single
+    `np.random.default_rng()` constructed once at MODULE level, not
+    per-block or per-compile -- reused across every call/compile so
+    successive blocks get genuinely fresh noise rather than either an
+    expensive per-block `Generator` construction or, worse, identical
+    repeating "noise" from a fixed per-block seed) at
+    `NOISE_CARRIER_AMPLITUDE` (0.7, matching the sawtooth's
+    `carrierAmplitude` -- comparable order of magnitude so unvoiced output
+    isn't wildly louder/quieter than voiced output; not precisely tuned by
+    ear yet, a placeholder subject to future by-ear tuning like this
+    file's other Effect Step parameters, e.g. see `voices/*.yaml`'s own
+    comments for that convention). This was NOT the previous behavior --
+    Slices 33/34 returned `np.zeros_like(block)` (silence) for unvoiced
+    input; this slice replaces that with a genuine noise carrier that then
+    goes through the SAME shaping below, per the standard vocoder design
+    of swapping the excitation signal (pulse-train-like carrier for
+    voiced, noise for unvoiced) while keeping the modulator-envelope
+    imposition itself identical.
 
     FILTER BANK: at COMPILE TIME, `FILTER_BANK_NUM_BANDS` (4) frequency
     bands are chosen, log-spaced from `FILTER_BANK_LOW_HZ` (150Hz) to
@@ -370,10 +414,17 @@ def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     the MODULATOR to isolate that band's content, (b) that's rectified
     (`np.abs`) and run through the band's envelope-follower lowpass
     filter to get a smoothed amplitude envelope, (c) the SAME band's
-    bandpass filter runs on the CARRIER (the sawtooth) to isolate that
+    bandpass filter runs on the CARRIER (sawtooth if voiced, white noise
+    if unvoiced -- see CARRIER, UNVOICED CASE above) to isolate that
     band's content from the carrier, (d) the band-filtered carrier is
     multiplied by the band's envelope, and (e) that shaped band is summed
-    into the output.
+    into the output. This loop is UNCHANGED and UNIFIED across both
+    voiced and unvoiced input (Slice 35): only the carrier waveform fed
+    into it differs by branch, per the standard vocoder design of
+    imposing the modulator's envelope onto whichever excitation signal is
+    appropriate -- there is no separate unvoiced code path here, and
+    unvoiced output is deliberately never left as silence or as a raw,
+    unshaped noise burst.
 
     NORMALIZATION: after summing all bands, the result is divided by
     `FILTER_BANK_NUM_BANDS` (averaging, so summing more bands doesn't
@@ -440,12 +491,14 @@ def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
         detectedFrequency = DetectPitch(block, sampleRate)
 
         if detectedFrequency <= 0.0:
-            return np.zeros_like(block)
-
-        time = np.arange(framesInBlock, dtype=np.float64) / sampleRate
-        phase = (detectedFrequency * time) % 1.0
-        sawtooth = (2.0 * phase - 1.0) * carrierAmplitude
-        carrier = sawtooth.reshape(-1, 1).astype(np.float32)
+            # Unvoiced (Slice 35): no clear pitch, so use a white-noise
+            # carrier instead of a spuriously-pitched sawtooth.
+            carrier = (VOCODER_NOISE_CARRIER_RNG.uniform(-1.0, 1.0, size=(framesInBlock, 1)) * NOISE_CARRIER_AMPLITUDE).astype(np.float32)
+        else:
+            time = np.arange(framesInBlock, dtype=np.float64) / sampleRate
+            phase = (detectedFrequency * time) % 1.0
+            sawtooth = (2.0 * phase - 1.0) * carrierAmplitude
+            carrier = sawtooth.reshape(-1, 1).astype(np.float32)
 
         shapedOutput = np.zeros((framesInBlock, 1), dtype=np.float64)
         for bandpassFilter, envelopeFollower in zip(bandpassFilters, envelopeFollowers):

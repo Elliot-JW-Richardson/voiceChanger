@@ -491,7 +491,7 @@
 
 **Completion promise:** `SLICE_35_DONE`
 **Depends on:** Slice 33
-**Status:** todo
+**Status:** done
 
 ## Slice 36 — Magos Voice uses the vocoder  _(Component: Voice Bank)_
 
