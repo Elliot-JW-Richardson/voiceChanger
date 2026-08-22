@@ -12,8 +12,9 @@ correctly -- hence `CompileChain` takes `sampleRate` and bakes it into
 the closures it builds for steps that need it. Slice 19 adds the second
 concrete type, ring modulation (a trivial custom oscillator multiply --
 `pedalboard` doesn't provide it). Slice 20 adds the third, distortion/
-bitcrush (via `pedalboard.Bitcrush`). Remaining palette types (EQ,
-reverb) arrive in later slices, 23 onward, and still raise
+bitcrush (via `pedalboard.Bitcrush`). Slice 23 adds the fourth, EQ (via
+`pedalboard.LowShelfFilter`/`HighShelfFilter`). The remaining palette
+type, reverb, arrives in a later slice (24) and still raises
 `NotImplementedError` until then.
 
 IMPORTANT for anyone adding a new Effect Step type: any expensive setup
@@ -31,7 +32,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Bitcrush, Gain, Limiter, Pedalboard, PitchShift
+from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, Pedalboard, PitchShift
 
 from voice_engine.voice import EffectStep, Voice
 
@@ -153,6 +154,54 @@ def CompileBitcrushStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep
     return BitcrushStep
 
 
+def CompileEqStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile an `eq` Effect Step into a callable that runs a block
+    through `pedalboard.LowShelfFilter` or `pedalboard.HighShelfFilter`
+    (see CONTEXT.md's Effect palette entry: "EQ (low/high shelf)").
+
+    Follows the exact same pattern as `CompilePitchShiftStep`/
+    `CompileBitcrushStep`: the `Pedalboard`/shelf-filter instance is
+    constructed ONCE here, at compile time, and reused for every
+    subsequent block via the closure -- constructing it per-block would
+    be expensive setup work happening on the real-time audio callback
+    thread, the bug class this project's "Real-time performance" notes
+    (CLAUDE.md) warn against.
+
+    `step.params["band"]` selects which shelf filter to build: `"low"`
+    for `LowShelfFilter` (boosts/cuts frequencies BELOW its cutoff) or
+    `"high"` for `HighShelfFilter` (boosts/cuts frequencies ABOVE its
+    cutoff). `step.params["cutoff_frequency_hz"]` and
+    `step.params["gain_db"]` map directly onto the matching pedalboard
+    constructor parameters of the same names; `q` is left at pedalboard's
+    own default (no Voice has needed to tune it yet).
+
+    `.process()` is called with the default `reset=True`, same rationale
+    as pitch shift and bitcrush: it guarantees the output is always the
+    SAME LENGTH as the input block, a hard requirement of this project's
+    fixed-block-size `outdata[:] = ...` contract. Like bitcrush, a shelf
+    filter has no cross-block state this project's acceptance criteria
+    care about, so this costs nothing here.
+    """
+    band = step.params["band"]
+    cutoffFrequencyHz = step.params["cutoff_frequency_hz"]
+    gainDb = step.params["gain_db"]
+
+    if band == "low":
+        shelfFilter = LowShelfFilter(cutoff_frequency_hz=cutoffFrequencyHz, gain_db=gainDb)
+    elif band == "high":
+        shelfFilter = HighShelfFilter(cutoff_frequency_hz=cutoffFrequencyHz, gain_db=gainDb)
+    else:
+        raise ValueError(f"Unknown EQ band: {band}")
+
+    pedalboardChain = Pedalboard([shelfFilter])
+
+    def EqStep(block: AudioBlock) -> AudioBlock:
+        eqedBlock = pedalboardChain.process(block, sampleRate, reset=True)
+        return eqedBlock.astype(np.float32)
+
+    return EqStep
+
+
 def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
@@ -161,9 +210,9 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
         Step types (e.g. pitch shift) whose underlying DSP depends on it.
 
     Dispatches by each step's `type`; `pitch_shift` (Slice 11), `ring_mod`
-    (Slice 19), and `bitcrush` (Slice 20) are the concrete types handled
-    so far. Any other type raises `NotImplementedError` -- EQ and reverb
-    arrive in later slices (23, 24).
+    (Slice 19), `bitcrush` (Slice 20), and `eq` (Slice 23) are the
+    concrete types handled so far. Any other type raises
+    `NotImplementedError` -- reverb arrives in a later slice (24).
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
@@ -173,6 +222,8 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompileRingModStep(step, sampleRate))
         elif step.type == "bitcrush":
             compiledSteps.append(CompileBitcrushStep(step, sampleRate))
+        elif step.type == "eq":
+            compiledSteps.append(CompileEqStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps
