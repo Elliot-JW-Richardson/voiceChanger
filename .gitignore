@@ -12,3 +12,8 @@ reference_audio/
 # User-made A/B test recordings (see app.py's /recordings routes) --
 # the user's own voice, not project source, never committed.
 recordings/
+
+# LLVC feasibility spike (Slice 37, ADR 0003) -- an isolated venv plus a
+# clone of the external LLVC repo, kept for local investigation only.
+# Heavy (PyTorch et al.) and not this project's source, never committed.
+llvc_spike/
