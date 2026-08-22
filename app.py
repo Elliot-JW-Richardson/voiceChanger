@@ -112,6 +112,10 @@ def SetVolume() -> Response:
     MASTER_VOLUME_HOLDER.Set(clampedLevel)
     return jsonify({"status": "ok", "level": clampedLevel})
 
+@app.route("/noise_gate", methods=["GET"])
+def GetNoiseGate() -> Response:
+    return jsonify({"level": NOISE_GATE_HOLDER.Get()})
+
 @app.route("/start", methods=["POST"])
 def StartStream() -> Response:
     global AUDIO_STREAM

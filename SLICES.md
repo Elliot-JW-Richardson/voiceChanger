@@ -395,7 +395,7 @@
 
 **Completion promise:** `SLICE_28_DONE`
 **Depends on:** Slice 26
-**Status:** todo
+**Status:** done
 
 ## Slice 29 — Noise gate slider appears on the page  _(Component: Noise Gate UI)_
 
