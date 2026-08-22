@@ -17,6 +17,8 @@ The data-driven collection of available Voices. Each Voice is defined declarativ
 
 Stored as one YAML file per Voice in a `voices/` directory (e.g. `voices/magos.yaml`), loaded by scanning the directory at startup. YAML chosen over JSON specifically so voice files can carry `#` comments documenting *why* a parameter is tuned the way it is — expected to be hand-edited by ear frequently. Requires `PyYAML` as a dependency.
 
+**Diagnostic Voices:** to audition where a multi-step chain's problem originates, a `debug-`-prefixed Voice (name prefixed `"DEBUG: "`) whose chain is a prefix of the real Voice's chain can be dropped into `voices/` temporarily and selected live — same mechanism as any other Voice, no code changes needed (first used to isolate a real-hardware Magos vocoder intelligibility issue). Delete once diagnosis is complete; not meant to be long-lived, since they drift out of sync with the Voice they were copied from.
+
 ### Passthrough Voice
 The trivial Voice: an empty Effect Step chain (mic straight to speaker, today's existing behavior). Not a special hardcoded engine fallback — it's an ordinary entry in the Voice Bank (`voices/passthrough.yaml`), so the engine never special-cases "nothing selected." Marked as the default Voice loaded on startup before any selection is made.
 
