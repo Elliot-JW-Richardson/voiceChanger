@@ -1,11 +1,26 @@
-"""Tests for the shipped Magos Voice (Slice 22).
+"""Tests for the shipped Magos Voice (Slice 22, chain composition revised
+in Slice 36).
 
-Verification (from SLICES.md, Slice 22):
-- Given the shipped Magos Voice definition
+Verification (from SLICES.md, Slice 36 -- supersedes Slice 22's original
+chain-composition verification):
+- Given the updated Magos Voice definition
 - When the Voice Bank is loaded
-- Then Magos appears with its full pitch-shift, ring-modulation, and
-  distortion chain in the declared order, and is selectable and becomes
-  active exactly like any other Voice
+- Then Magos's chain includes the vocoder Effect Step, and is selectable
+  and becomes active exactly like any other Voice
+
+Following tests/test_master_volume_gain.py's precedent for documenting a
+revised test: `test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder`
+(Slice 22) is revised here to
+`test_MagosVoiceShipsWithPitchShiftVocoderAndBitcrushChainInOrder`
+because Magos's chain composition intentionally changed -- per ADR 0004
+("Build a real vocoder rather than tune ring modulation further"), the
+vocoder Effect Step REPLACES ring modulation rather than supplementing
+it: a fixed-frequency carrier (ring_mod) can't reproduce the
+melody-tracking harmonic series the reference track's analysis found,
+and the vocoder's pitch-tracked sawtooth/noise carrier already produces
+a buzzy/robotic timbre on its own, making ring_mod redundant once
+vocoder exists. `pitch_shift` and `bitcrush` are unaffected by this
+revision and keep their original assertions.
 
 Following tests/test_deep_voice.py's precedent, this loads the REAL
 `voices/` directory shipped with the project (not a synthetic tmp_path
@@ -26,7 +41,7 @@ from voice_engine.bank import LoadVoiceBank
 VOICES_DIRECTORY_PATH = Path(__file__).parent.parent / "voices"
 
 
-def test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder() -> None:
+def test_MagosVoiceShipsWithPitchShiftVocoderAndBitcrushChainInOrder() -> None:
     voiceBank = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 
     magosVoice = next(voice for voice in voiceBank.voices if voice.id == "magos")
@@ -34,13 +49,16 @@ def test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder() -> None:
     assert magosVoice.default is False
     assert len(magosVoice.chain) == 3
 
-    pitchShiftStep, ringModStep, bitcrushStep = magosVoice.chain
+    pitchShiftStep, vocoderStep, bitcrushStep = magosVoice.chain
 
     assert pitchShiftStep.type == "pitch_shift"
     assert pitchShiftStep.params["semitones"] < -6
 
-    assert ringModStep.type == "ring_mod"
-    assert ringModStep.params["frequency"] > 0
+    # No params required (see voice_engine/voice.py's ParseEffectStep and
+    # voice_engine/engine.py's CompileVocoderStep) -- just confirms the
+    # step is present, in the middle of the chain, between pitch_shift and
+    # bitcrush.
+    assert vocoderStep.type == "vocoder"
 
     assert bitcrushStep.type == "bitcrush"
     # Raised from an original <= 8 sanity bound: bit_depth had to go up to
