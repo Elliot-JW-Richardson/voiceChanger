@@ -15,7 +15,11 @@ concrete type, ring modulation (a trivial custom oscillator multiply --
 bitcrush (via `pedalboard.Bitcrush`). Slice 23 adds the fourth, EQ (via
 `pedalboard.LowShelfFilter`/`HighShelfFilter`). Slice 24 adds the fifth
 and final palette type, reverb (via `pedalboard.Reverb`), completing the
-Effect palette (see CONTEXT.md).
+Effect palette (see CONTEXT.md). Slice 33 adds `vocoder`, a distinct
+Effect Step type from the rest of the palette (see CONTEXT.md's "Vocoder
+Effect Step (v2, scoped -- see ADR 0004)" entry) -- a pitch-tracked
+sawtooth carrier, the first of several staged sub-slices (Band 7) toward
+a full formant vocoder.
 
 IMPORTANT for anyone adding a new Effect Step type: any expensive setup
 (e.g. constructing a `pedalboard.Pedalboard`/plugin instance) MUST happen
@@ -34,6 +38,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, NoiseGate, Pedalboard, PitchShift, Reverb
 
+from voice_engine.pitch_tracker import DetectPitch
 from voice_engine.voice import EffectStep, Voice
 
 AudioBlock = NDArray[np.float32]
@@ -248,6 +253,81 @@ def CompileReverbStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     return ReverbStep
 
 
+def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `vocoder` Effect Step into a callable that replaces a
+    block's own waveform with a pitch-tracked sawtooth carrier (see
+    CONTEXT.md's "Vocoder Effect Step (v2, scoped -- see ADR 0004)" entry
+    and docs/adr/0004-vocoder-over-tuned-ring-mod.md).
+
+    Unlike `CompileRingModStep`'s fixed-frequency oscillator, this
+    carrier's frequency is re-derived every block from the block's OWN
+    content: `DetectPitch` (voice_engine.pitch_tracker, Slice 32) runs
+    once per call to find that block's detected fundamental, and the
+    sawtooth is synthesized at exactly that frequency. This is what lets
+    the carrier track a moving melody (ADR 0004's reference-track
+    analysis found a fundamental moving 42-58Hz) rather than sit at one
+    tuned frequency, which ADR 0004 found provably cannot reproduce a
+    melody-tracking harmonic series.
+
+    SAWTOOTH, NOT SINE: `phase = (frequency * t) % 1.0; sawtooth =
+    2 * phase - 1.0` is a rising-ramp sawtooth. Its Fourier series
+    contains energy at every harmonic of `frequency` (decaying as 1/n),
+    unlike a sine's single spectral line -- this is what gives the
+    output the "rich multi-harmonic structure" this slice's acceptance
+    criteria (SLICES.md, Slice 33) asks for, and is a genuine step toward
+    the reference track's observed dense harmonic series (ADR 0004).
+
+    PHASE RESETS EVERY BLOCK (`t = np.arange(framesInBlock) / sampleRate`
+    starts at 0 on every call, no `nonlocal` phase accumulator) -- this
+    is a deliberate design choice, not an oversight, and is the OPPOSITE
+    of `CompileRingModStep`'s continuous-phase carrier. Ring modulation's
+    Slice 19 acceptance criteria specifically tested phase continuity
+    across a block boundary; this slice's acceptance criteria does not --
+    it only requires each block's OWN dominant frequency to match that
+    block's OWN detected pitch, which a per-block-reset carrier already
+    satisfies. It mirrors this project's established `reset=True`
+    convention (see `CompilePitchShiftStep`'s docstring): each block is
+    treated as its own complete, independent unit rather than carrying
+    state across the block boundary. A future slice could add phase
+    continuity if a later acceptance criteria needs it, the same way
+    ring modulation's did.
+
+    UNVOICED FALLBACK: if `DetectPitch` returns 0.0 (silence or no clear
+    periodicity), this returns a silent (all-zero) block. Full voiced/
+    unvoiced handling (a noise carrier instead of silence) is explicitly
+    Slice 35's job, not this slice's -- see SLICES.md.
+
+    AMPLITUDE: a fixed placeholder of 0.7 -- comfortably within
+    [-1.0, 1.0] with headroom to spare, chosen simply as "clearly
+    audible, no clipping risk," not a value with any deeper meaning. The
+    block's own waveform is being REPLACED, not scaled, so there is no
+    input amplitude to match yet; Slice 34 will shape amplitude (and much more
+    -- the actual spectral envelope) from the input's own extracted
+    formant envelope, per CONTEXT.md's Vocoder entry. Don't over-engineer
+    amplitude matching here.
+
+    No expensive one-time setup is needed (no `Pedalboard`/plugin
+    instance to construct, unlike most of this file's other `Compile*Step`
+    functions) -- like `CompileRingModStep`, the oscillator math is cheap
+    enough to live entirely inside the returned closure.
+    """
+    carrierAmplitude = 0.7
+
+    def VocoderStep(block: AudioBlock) -> AudioBlock:
+        framesInBlock = block.shape[0]
+        detectedFrequency = DetectPitch(block, sampleRate)
+
+        if detectedFrequency <= 0.0:
+            return np.zeros_like(block)
+
+        time = np.arange(framesInBlock, dtype=np.float64) / sampleRate
+        phase = (detectedFrequency * time) % 1.0
+        sawtooth = (2.0 * phase - 1.0) * carrierAmplitude
+        return sawtooth.reshape(-1, 1).astype(np.float32)
+
+    return VocoderStep
+
+
 def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
@@ -258,7 +338,10 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
     Dispatches by each step's `type`; `pitch_shift` (Slice 11), `ring_mod`
     (Slice 19), `bitcrush` (Slice 20), `eq` (Slice 23), and `reverb`
     (Slice 24) are the concrete types handled so far -- the full Effect
-    palette (see CONTEXT.md). Any other type raises
+    palette (see CONTEXT.md). `vocoder` (Slice 33) is a further, distinct
+    Effect Step type layered on top of that palette (see CONTEXT.md's
+    "Vocoder Effect Step (v2, scoped -- see ADR 0004)" entry), not one of
+    the original five palette entries itself. Any other type raises
     `NotImplementedError`.
     """
     compiledSteps: list[CompiledEffectStep] = []
@@ -273,6 +356,8 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompileEqStep(step, sampleRate))
         elif step.type == "reverb":
             compiledSteps.append(CompileReverbStep(step, sampleRate))
+        elif step.type == "vocoder":
+            compiledSteps.append(CompileVocoderStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps

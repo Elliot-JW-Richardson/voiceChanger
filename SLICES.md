@@ -465,7 +465,7 @@
 
 **Completion promise:** `SLICE_33_DONE`
 **Depends on:** Slice 32, Slice 1
-**Status:** todo
+**Status:** done
 
 ## Slice 34 — Vocoder applies the modulator's formant envelope to the carrier  _(Component: Vocoder)_
 
