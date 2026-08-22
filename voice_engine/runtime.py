@@ -28,13 +28,31 @@ cross-thread hazard applies once Slice 27 reads it from the audio
 callback while a Flask request thread sets it, so it follows the same
 lock-guarded pattern.
 
-Deliberately minimal: no pub/sub, no callbacks-on-change, no
-persistence -- just thread-safe get/set holders.
+RecordingHolder (added for A/B testing workflow, not a SLICES.md slice)
+tracks whether a recording of the LIVE OUTPUT (the exact audio sent to
+the speaker, post-Voice-chain and post-Master-Volume) is in progress,
+buffering blocks in memory rather than writing to disk -- disk I/O
+inside the real-time audio callback risks exactly the kind of glitching
+CLAUDE.md's "Real-time performance" notes warn against elsewhere in
+this project, so `AppendBlock` only ever does a cheap, lock-guarded
+list append; actual WAV-file writing happens later, on a Flask request
+thread, once recording stops (see voice_engine/recording.py).
+
+Deliberately minimal: no pub/sub, no callbacks-on-change -- just
+thread-safe get/set holders (RecordingHolder buffers in memory while
+active, which is its own limited form of state, but still exposes a
+plain start/append/stop interface, not a persistence layer).
 """
 import threading
+from typing import Optional
+
+from numpy.typing import NDArray
+import numpy as np
 
 from voice_engine.bank import VoiceBank
 from voice_engine.voice import Voice
+
+AudioBlock = NDArray[np.float32]
 
 
 class ActiveVoiceHolder:
@@ -107,3 +125,57 @@ class NoiseGateHolder:
         """Set the current Noise Gate level."""
         with self.lock:
             self.level = level
+
+
+class RecordingHolder:
+    """Buffers the live audio callback's final output blocks in memory
+    while a recording is in progress, labeled with whichever Voice was
+    active when recording started (see this module's docstring for why
+    buffering in memory, not writing to disk here).
+
+    Inactive (not recording) by default. `Start` clears any previous
+    buffer -- only one recording is tracked at a time, matching this
+    project's single-Voice/single-Stream simplicity elsewhere (no
+    concurrent recordings)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.active = False
+        self.voiceLabel: Optional[str] = None
+        self.blocks: list[AudioBlock] = []
+
+    def Start(self, voiceLabel: str) -> None:
+        """Begin a new recording labeled with `voiceLabel` (the active
+        Voice's id at the moment recording starts), discarding any
+        previously buffered blocks."""
+        with self.lock:
+            self.active = True
+            self.voiceLabel = voiceLabel
+            self.blocks = []
+
+    def IsActive(self) -> bool:
+        """Return whether a recording is currently in progress."""
+        with self.lock:
+            return self.active
+
+    def AppendBlock(self, block: AudioBlock) -> None:
+        """Append one audio block to the in-progress recording, if one
+        is active. A no-op (cheap to call unconditionally every block
+        from the real-time audio callback) when not recording."""
+        with self.lock:
+            if self.active:
+                self.blocks.append(block.copy())
+
+    def Stop(self) -> tuple[bool, Optional[str], list[AudioBlock]]:
+        """Stop the current recording (if any), returning
+        `(wasActive, voiceLabel, blocks)` -- `wasActive` is False (and
+        `voiceLabel`/`blocks` empty) if no recording was in progress.
+        Resets to the inactive/empty state regardless."""
+        with self.lock:
+            wasActive = self.active
+            voiceLabel = self.voiceLabel
+            blocks = self.blocks
+            self.active = False
+            self.voiceLabel = None
+            self.blocks = []
+        return wasActive, voiceLabel, blocks

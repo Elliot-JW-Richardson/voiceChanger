@@ -30,6 +30,21 @@
             background: #fff3cd;
             border: 1px solid #e0c36a;
         }
+        .recording-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 6px 0;
+            font-size: 0.85rem;
+            text-align: left;
+        }
+        .recording-item span {
+            flex-shrink: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 160px;
+        }
     </style>
 </head>
 <body>
@@ -52,6 +67,13 @@
     <div id="noiseGateControl">
         <label for="noiseGateSlider">Noise Gate</label>
         <input type="range" id="noiseGateSlider" min="0" max="100" value="0">
+    </div>
+
+    <div id="recordingControl">
+        <div class="voice-group-heading">Recordings</div>
+        <button id="recordBtn">Start Recording</button>
+        <button id="clearRecordingsBtn">Clear All Recordings</button>
+        <div id="recordingList"></div>
     </div>
 
     <script>
@@ -144,11 +166,55 @@
                 });
             });
 
+            async function renderRecordingList() {
+                const res = await fetch('/recordings');
+                const data = await res.json();
+                const listEl = document.getElementById('recordingList');
+                listEl.innerHTML = '';
+
+                data.recordings.forEach((filename) => {
+                    const item = document.createElement('div');
+                    item.classList.add('recording-item');
+
+                    const label = document.createElement('span');
+                    label.textContent = filename;
+                    item.appendChild(label);
+
+                    const audio = document.createElement('audio');
+                    audio.controls = true;
+                    audio.src = `/recordings/${filename}`;
+                    item.appendChild(audio);
+
+                    listEl.appendChild(item);
+                });
+            }
+
+            let isRecording = false;
+            const recordBtn = document.getElementById('recordBtn');
+            recordBtn.addEventListener('click', async () => {
+                if (!isRecording) {
+                    await fetch('/recordings/start', { method: 'POST' });
+                    isRecording = true;
+                    recordBtn.textContent = 'Stop Recording';
+                } else {
+                    await fetch('/recordings/stop', { method: 'POST' });
+                    isRecording = false;
+                    recordBtn.textContent = 'Start Recording';
+                    renderRecordingList();
+                }
+            });
+
+            document.getElementById('clearRecordingsBtn').addEventListener('click', async () => {
+                await fetch('/recordings/clear', { method: 'POST' });
+                renderRecordingList();
+            });
+
             // Initial status
             refreshStatus();
             renderVoiceList();
             renderVolumeSlider();
             renderNoiseGateSlider();
+            renderRecordingList();
 
         });
     </script>

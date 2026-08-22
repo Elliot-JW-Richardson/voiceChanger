@@ -8,3 +8,7 @@ __pycache__/
 # kept locally for spectral analysis, never committed: copyrighted
 # third-party material, not something that belongs in a public repo.
 reference_audio/
+
+# User-made A/B test recordings (see app.py's /recordings routes) --
+# the user's own voice, not project source, never committed.
+recordings/

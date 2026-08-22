@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -6,7 +7,8 @@ from flask import Flask, Response, jsonify, send_from_directory, request
 
 from voice_engine.bank import LoadVoiceBank
 from voice_engine.engine import ApplyMasterVolume, ApplyNoiseGate, AudioBlock, CompiledChainCache, ProcessChain
-from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder, NoiseGateHolder
+from voice_engine.recording import SaveRecordingWav
+from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder, NoiseGateHolder, RecordingHolder
 
 app = Flask(__name__)
 
@@ -48,6 +50,13 @@ MASTER_VOLUME_HOLDER = MasterVolumeHolder()
 NOISE_GATE_HOLDER = NoiseGateHolder()
 COMPILED_CHAIN_CACHE = CompiledChainCache(SAMPLE_RATE)
 
+# Local-only, gitignored (like reference_audio/) -- these are the user's
+# own A/B test recordings, not project source, and not something to
+# commit. Created on import if it doesn't exist yet.
+RECORDINGS_DIRECTORY_PATH = Path(__file__).parent / "recordings"
+RECORDINGS_DIRECTORY_PATH.mkdir(exist_ok=True)
+RECORDING_HOLDER = RecordingHolder()
+
 AUDIO_STREAM: Optional[sd.Stream] = None  # global handle to the stream
 
 
@@ -77,6 +86,12 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
     # rather than folded into COMPILED_CHAIN_CACHE/ProcessChain above.
     masterVolumeLevel = MASTER_VOLUME_HOLDER.Get()
     outdata[:] = ApplyMasterVolume(processedBlock, masterVolumeLevel, SAMPLE_RATE)
+    # Buffers a copy of the exact audio just sent to the speaker, if a
+    # recording is in progress (see RecordingHolder's docstring for why
+    # this only ever appends to an in-memory buffer -- no disk I/O here,
+    # that would risk the same underflow/overflow class of bug this
+    # project's Real-time performance notes warn against elsewhere).
+    RECORDING_HOLDER.AppendBlock(outdata)
 
 
 @app.route("/")
@@ -126,6 +141,54 @@ def SetNoiseGate() -> Response:
     clampedLevel = max(0, min(100, requestedLevel))
     NOISE_GATE_HOLDER.Set(clampedLevel)
     return jsonify({"status": "ok", "level": clampedLevel})
+
+@app.route("/recordings/start", methods=["POST"])
+def StartRecording() -> Response:
+    # Labeled with whichever Voice is active RIGHT NOW -- if the user
+    # switches Voice mid-recording, the label still reflects whatever was
+    # active at the moment recording started (documented workflow:
+    # stop/restart recording when switching Voices, don't switch
+    # mid-take).
+    activeVoiceId = ACTIVE_VOICE_HOLDER.Get().id
+    RECORDING_HOLDER.Start(activeVoiceId)
+    return jsonify({"status": "ok", "voiceId": activeVoiceId})
+
+@app.route("/recordings/stop", methods=["POST"])
+def StopRecording() -> Response:
+    wasActive, voiceLabel, blocks = RECORDING_HOLDER.Stop()
+    if not wasActive:
+        return jsonify({"status": "not_recording"})
+
+    # Microsecond resolution -- second-only resolution let two rapid
+    # start/stop cycles collide on the same filename and silently
+    # overwrite each other (caught by tests/test_recordings_api.py).
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    filename = f"{voiceLabel}_{timestamp}.wav"
+    filePath = RECORDINGS_DIRECTORY_PATH / filename
+    SaveRecordingWav(blocks, SAMPLE_RATE, str(filePath))
+    return jsonify({"status": "ok", "filename": filename})
+
+@app.route("/recordings", methods=["GET"])
+def ListRecordings() -> Response:
+    recordingFiles = sorted(
+        RECORDINGS_DIRECTORY_PATH.glob("*.wav"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,  # newest first -- matches the "don't get confused
+        # with stale examples" workflow this was built for.
+    )
+    return jsonify({"recordings": [path.name for path in recordingFiles]})
+
+@app.route("/recordings/<filename>", methods=["GET"])
+def GetRecording(filename: str) -> Response:
+    # send_from_directory sanitizes `filename` against path traversal.
+    return send_from_directory(str(RECORDINGS_DIRECTORY_PATH), filename)
+
+@app.route("/recordings/clear", methods=["POST"])
+def ClearRecordings() -> Response:
+    recordingFiles = list(RECORDINGS_DIRECTORY_PATH.glob("*.wav"))
+    for path in recordingFiles:
+        path.unlink()
+    return jsonify({"status": "ok", "cleared": len(recordingFiles)})
 
 @app.route("/start", methods=["POST"])
 def StartStream() -> Response:
