@@ -19,6 +19,17 @@
             margin-top: 20px;
             font-weight: bold;
         }
+        .voice-group-heading {
+            margin: 20px 0 4px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #666;
+        }
+        #voiceListTest .voice-option {
+            background: #fff3cd;
+            border: 1px solid #e0c36a;
+        }
     </style>
 </head>
 <body>
@@ -26,7 +37,12 @@
         <button id="startBtn">Start</button>
         <button id="stopBtn">Stop</button>
     <div id="status">(stopped)</div>
-    <div id="voiceList"></div>
+    <div id="voiceList">
+        <div class="voice-group-heading">Voices</div>
+        <div id="voiceListFull"></div>
+        <div id="testingHeading" class="voice-group-heading" style="display:none">Testing</div>
+        <div id="voiceListTest"></div>
+    </div>
 
     <div id="volumeControl">
         <label for="volumeSlider">Master Volume</label>
@@ -61,8 +77,11 @@
             async function renderVoiceList() {
                 const res = await fetch('/voices');
                 const data = await res.json();
-                const voiceListEl = document.getElementById('voiceList');
-                voiceListEl.innerHTML = '';
+                const fullListEl = document.getElementById('voiceListFull');
+                const testListEl = document.getElementById('voiceListTest');
+                const testingHeadingEl = document.getElementById('testingHeading');
+                fullListEl.innerHTML = '';
+                testListEl.innerHTML = '';
 
                 data.voices.forEach((voice) => {
                     const optionBtn = document.createElement('button');
@@ -80,8 +99,17 @@
                         });
                         renderVoiceList();
                     });
-                    voiceListEl.appendChild(optionBtn);
+                    // Clusters "Testing" (diagnostic/WIP) Voices separately
+                    // from finished "Voices" so it's obvious which is which
+                    // (see CONTEXT.md's "Diagnostic Voices" note).
+                    if (voice.test) {
+                        testListEl.appendChild(optionBtn);
+                    } else {
+                        fullListEl.appendChild(optionBtn);
+                    }
                 });
+
+                testingHeadingEl.style.display = testListEl.children.length > 0 ? '' : 'none';
             }
 
             async function renderVolumeSlider() {

@@ -52,13 +52,20 @@ class EffectStep:
 
 @dataclass
 class Voice:
-    """A single loaded Voice: its id, display name, default flag, and
-    ordered chain of declarative Effect Steps."""
+    """A single loaded Voice: its id, display name, default flag, test
+    flag, and ordered chain of declarative Effect Steps.
+
+    `test`: marks a Voice as a diagnostic/work-in-progress entry rather
+    than a finished character Voice (see CONTEXT.md's "Diagnostic
+    Voices" note) -- the UI (index.html) clusters these into a separate
+    "Testing" section instead of mixing them in with real Voices.
+    Defaults to False, same convention as `default`."""
 
     id: str
     name: str
     default: bool
     chain: list[EffectStep]
+    test: bool = False
 
 
 def ParseEffectStep(stepDefinition: dict[str, Any]) -> EffectStep:
@@ -88,4 +95,5 @@ def LoadVoice(voiceFilePath: str) -> Voice:
         name=rawVoice["name"],
         default=rawVoice.get("default", False),
         chain=chain,
+        test=rawVoice.get("test", False),
     )

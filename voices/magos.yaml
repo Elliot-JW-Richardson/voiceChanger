@@ -3,67 +3,34 @@ name: Magos
 default: false
 # The flagship cosplay character Voice (see CONTEXT.md's Voice Bank and
 # Deployment scope entries) -- a Warhammer 40K Magos-style robotic,
-# distorted voice. Chains vocoder, pitch shift, and bitcrush.
+# distorted voice. Chains pitch shift, ring modulation, and bitcrush, per
+# CONTEXT.md's example dialogue: "Chain a pitch shift with ring modulation
+# and some distortion -- those are just more Effect Steps in the same
+# list."
 #
-# Re-tuned in Slice 36 to replace ring_mod with the vocoder Effect Step,
-# per ADR 0004 ("Build a real vocoder rather than tune ring modulation
-# further"): spectral analysis of a user-provided reference track found a
-# melody-tracking, harmonically-rich fundamental (42-58Hz) that a
-# fixed-frequency oscillator like ring_mod's can never reproduce (its
-# sidebands are always offset from the voice's own harmonics by a
-# constant carrier frequency, not the clean, pitch-tracking series
-# actually observed). The ADR frames the vocoder as ring_mod's
-# REPLACEMENT, not an addition alongside it: a pitch-tracked sawtooth/
-# noise carrier already produces a buzzy/robotic timbre on its own,
-# making ring_mod's fixed-frequency buzz redundant once vocoder exists.
-#
-# ORDERING FIX (post-Slice-36, real-hardware regression): Slice 36
-# originally shipped pitch_shift BEFORE vocoder, on the theory that this
-# would land the vocoder's tracked carrier frequency closer to ADR 0004's
-# 42-58Hz target register. In practice this broke the vocoder outright --
-# a real voice's fundamental, once already shifted down ~44% by -10
-# semitones, lands around 50-90Hz, which is BELOW the vocoder's filter
-# bank's lowest band edge (150Hz, see CompileVocoderStep's
-# FILTER_BANK_LOW_HZ -- tuned in Slice 34 against natural-register test
-# tones, not an already-halved pitch). The carrier's true fundamental
-# gets filtered away by every band, leaving only stray, poorly-isolated
-# harmonics to dominate the output -- verified via a synthetic swept-
-# pitch diagnostic to jump around with no stable relationship to the
-# input pitch (e.g. input 98Hz produced a 165Hz output peak, input 106Hz
-# produced 179Hz), which is what "squeaks" on real hardware. Reordering
-# to vocoder FIRST lets it track and shape the voice at its NATURAL
-# register (where Slice 34's filter bank was actually tuned), then
-# pitch_shift transposes the whole finished vocoded signal down
-# afterward, same as pitch-shifting a finished recording -- verified via
-# the same diagnostic to track cleanly and monotonically (e.g. input
-# 90Hz -> output ~50Hz, input 114Hz -> output ~65Hz, no octave jumps).
-#
-# Benchmarked (see Slice 36) at 0/300 calls over the ~139ms real-time
-# budget across three independent runs against this exact chain plus
-# ApplyMasterVolume at 150% -- comfortable margin (worst observed max
-# ~113ms, ~1.23x under budget), so SAMPLE_RATE/BLOCKSIZE did not need
-# retuning. Reordering these three steps does not change their
-# individual per-call cost, so this margin still holds.
+# REVERTED from a vocoder-based chain (Slice 36) back to this known-good
+# ring_mod design: real-hardware testing found the vocoder Effect Step
+# destroyed voice intelligibility outright (it discards the input's own
+# waveform and resynthesizes from a detected pitch plus a coarse 4-band
+# envelope -- see voice_engine/engine.py's CompileVocoderStep docstring),
+# and a follow-up "mix a sawtooth into the voice instead" experiment
+# (sawtooth_blend) was tried and also failed on real hardware (extremely
+# loud output, no audible speech). Both attempts are removed rather than
+# left half-working. This chain is the last version confirmed to actually
+# sound like a voice; the vocoder/electronic-texture idea is on hold
+# pending a more careful analysis of the original reference track (see
+# ADR 0004) before trying again.
 chain:
-  # Replaces the old ring_mod step (see this file's header comment and
-  # ADR 0004): combines a pitch-tracked carrier with the voice's OWN
-  # (natural-register) formant envelope, producing a melody-tracking
-  # harmonic buzz plus preserved intelligibility that a fixed-frequency
-  # ring-mod oscillator structurally cannot reproduce. Runs FIRST (not
-  # after pitch_shift -- see the ORDERING FIX note above) so its internal
-  # pitch tracker and filter bank operate on the voice's actual pitch,
-  # not an already-halved one. No params -- see
-  # voice_engine/engine.py's CompileVocoderStep for the (compile-time-
-  # fixed) filter bank/carrier tuning.
-  - type: vocoder
   # -10 semitones: noticeably deeper/more extreme than Deep Voice's -6, so
   # Magos reads as a distinct, more inhuman register rather than just a
-  # louder version of Deep. Runs AFTER vocoder (see the ORDERING FIX note
-  # above) -- transposes the whole finished, already-vocoded signal down
-  # as a unit, rather than trying to make the vocoder's own pitch
-  # tracking operate at an unnaturally low register it wasn't tuned for.
+  # louder version of Deep.
   - type: pitch_shift
     semitones: -10
+  # 35 Hz: in the tens-of-Hz range this project's ring-mod tests use for a
+  # metallic/robotic buzz (see tests/test_ring_mod_step.py) -- audible as
+  # texture on top of the voice without turning it into pure noise.
+  - type: ring_mod
+    frequency: 35
   # bit_depth 10 (raised from an initial 5 -- see git history and
   # CONTEXT.md's Effect palette entry): pedalboard.Bitcrush quantizes in
   # FIXED steps across the full [-1, 1] range, not relative to the actual
@@ -72,8 +39,6 @@ chain:
   # values total -- heard as buzzy squeaks, not a voice. 10 keeps
   # meaningful grit at full volume while staying intelligible at realistic
   # quiet input levels. Re-tune by ear if your mic input level changes
-  # (e.g. after adjusting OS/hardware input gain). Stays LAST in the
-  # chain for a final layer of grit applied on top of the vocoded,
-  # pitch-shifted signal.
+  # (e.g. after adjusting OS/hardware input gain).
   - type: bitcrush
     bit_depth: 10

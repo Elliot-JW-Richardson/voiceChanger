@@ -86,7 +86,7 @@ def Index() -> Response:
 
 @app.route("/voices", methods=["GET"])
 def ListVoices() -> Response:
-    voices = [{"id": voice.id, "name": voice.name} for voice in VOICE_BANK.voices]
+    voices = [{"id": voice.id, "name": voice.name, "test": voice.test} for voice in VOICE_BANK.voices]
     activeVoiceId = ACTIVE_VOICE_HOLDER.Get().id
     return jsonify({"voices": voices, "activeVoiceId": activeVoiceId})
 

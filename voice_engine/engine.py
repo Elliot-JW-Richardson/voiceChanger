@@ -514,78 +514,6 @@ def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     return VocoderStep
 
 
-SAWTOOTH_BLEND_CARRIER_AMPLITUDE = 0.7
-
-
-def CompileSawtoothBlendStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
-    """Compile a `sawtooth_blend` Effect Step: MIX a pitch-tracked sawtooth
-    carrier INTO the voice, rather than replacing the voice with one (see
-    `CompileVocoderStep` above).
-
-    WHY THIS EXISTS: real-hardware testing of `vocoder` found it destroyed
-    intelligibility -- it discards the input block's actual waveform
-    entirely and resynthesizes from only a detected pitch plus a handful
-    of coarse per-band loudness envelopes, none of which carry the actual
-    harmonic/formant detail a real voice needs to stay recognizable. This
-    step takes the opposite approach: the ORIGINAL block passes through
-    untouched, and a pitch-tracked sawtooth (the "electronic" texture the
-    vocoder was also trying to add) is blended in on top at a tunable
-    level, so the underlying voice's own clarity is never at risk -- at
-    `mix=0.0` this is an exact passthrough, unlike `vocoder`, which has no
-    such graceful floor.
-
-    `step.params["mix"]`: 0.0-1.0, the fraction of the output that's
-    sawtooth carrier vs. original voice (`output = (1-mix)*voice +
-    mix*carrier`); no range validation here (consistent with every other
-    per-Voice declarative param in this file, e.g. `pitch_shift`'s
-    `semitones`, `eq`'s `gain_db` -- trusted to be set correctly in the
-    Voice's YAML, not runtime-clamped).
-
-    PITCH TRACKING: reuses `DetectPitch` exactly as `CompileVocoderStep`
-    does (autocorrelation, 50-500Hz search range, per-block, no state
-    carried across blocks). UNVOICED FALLBACK differs deliberately from
-    `vocoder`'s Slice-35 noise-carrier design: when `DetectPitch` reports
-    no clear pitch (silence, or a consonant with no clean periodicity),
-    this step just passes the ORIGINAL block through unchanged for that
-    block (mix effectively drops to 0), rather than mixing in white noise.
-    This keeps the step's only moving part being the sawtooth carrier
-    itself -- simpler, and avoids reintroducing noise-carrier behavior
-    that hasn't been validated against real speech either. Worth
-    revisiting once the sawtooth-blend mix level itself is validated by
-    ear.
-
-    CARRIER: an unshaped sawtooth at the detected frequency (phase resets
-    every block, same formula/trade-off as `CompileVocoderStep`'s carrier
-    -- see that function's docstring for the accepted-limitation
-    reasoning), scaled by a fixed `SAWTOOTH_BLEND_CARRIER_AMPLITUDE`
-    (0.7, matching `vocoder`'s own carrier amplitude placeholder) before
-    the mix -- NOT shaped by any per-band envelope/filter bank, since the
-    whole point here is to avoid the filter-bank/formant machinery that
-    real-hardware testing found broke intelligibility. Re-tune
-    `SAWTOOTH_BLEND_CARRIER_AMPLITUDE` and `mix` together by ear once this
-    is validated on real hardware, same as any other Voice parameter (see
-    CONTEXT.md's Voice Bank entry).
-    """
-    mix = step.params["mix"]
-
-    def SawtoothBlendStep(block: AudioBlock) -> AudioBlock:
-        framesInBlock = block.shape[0]
-        detectedFrequency = DetectPitch(block, sampleRate)
-
-        if detectedFrequency <= 0.0:
-            return block
-
-        time = np.arange(framesInBlock, dtype=np.float64) / sampleRate
-        phase = (detectedFrequency * time) % 1.0
-        sawtooth = (2.0 * phase - 1.0) * SAWTOOTH_BLEND_CARRIER_AMPLITUDE
-        carrier = sawtooth.reshape(-1, 1).astype(np.float32)
-
-        blended = (1.0 - mix) * block + mix * carrier
-        return blended.astype(np.float32)
-
-    return SawtoothBlendStep
-
-
 def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
@@ -599,11 +527,7 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
     palette (see CONTEXT.md). `vocoder` (Slice 33) is a further, distinct
     Effect Step type layered on top of that palette (see CONTEXT.md's
     "Vocoder Effect Step (v2, scoped -- see ADR 0004)" entry), not one of
-    the original five palette entries itself. `sawtooth_blend` (added
-    after real-hardware testing found `vocoder` destroyed intelligibility
-    -- see `CompileSawtoothBlendStep`'s docstring) is a simpler
-    alternative: it MIXES a pitch-tracked sawtooth into the voice instead
-    of replacing the voice with one. Any other type raises
+    the original five palette entries itself. Any other type raises
     `NotImplementedError`.
     """
     compiledSteps: list[CompiledEffectStep] = []
@@ -620,8 +544,6 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompileReverbStep(step, sampleRate))
         elif step.type == "vocoder":
             compiledSteps.append(CompileVocoderStep(step, sampleRate))
-        elif step.type == "sawtooth_blend":
-            compiledSteps.append(CompileSawtoothBlendStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps

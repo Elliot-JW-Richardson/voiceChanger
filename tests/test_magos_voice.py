@@ -1,36 +1,21 @@
-"""Tests for the shipped Magos Voice (Slice 22, chain composition revised
-in Slice 36, chain ORDER further revised post-Slice-36 after a real-
-hardware regression).
+"""Tests for the shipped Magos Voice (Slice 22).
 
-Verification (from SLICES.md, Slice 36 -- supersedes Slice 22's original
-chain-composition verification):
-- Given the updated Magos Voice definition
+Verification (from SLICES.md, Slice 22):
+- Given the shipped Magos Voice definition
 - When the Voice Bank is loaded
-- Then Magos's chain includes the vocoder Effect Step, and is selectable
-  and becomes active exactly like any other Voice
+- Then Magos appears with its full pitch-shift, ring-modulation, and
+  distortion chain in the declared order, and is selectable and becomes
+  active exactly like any other Voice
 
-Following tests/test_master_volume_gain.py's precedent for documenting a
-revised test: `test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder`
-(Slice 22) is revised here to
-`test_MagosVoiceShipsWithVocoderPitchShiftAndBitcrushChainInOrder`
-because Magos's chain composition intentionally changed -- per ADR 0004
-("Build a real vocoder rather than tune ring modulation further"), the
-vocoder Effect Step REPLACES ring modulation rather than supplementing
-it: a fixed-frequency carrier (ring_mod) can't reproduce the
-melody-tracking harmonic series the reference track's analysis found,
-and the vocoder's pitch-tracked sawtooth/noise carrier already produces
-a buzzy/robotic timbre on its own, making ring_mod redundant once
-vocoder exists.
-
-ORDER, not just presence, matters here and is asserted below: Slice 36
-originally shipped `pitch_shift` BEFORE `vocoder`, which broke the
-vocoder on real hardware (see voices/magos.yaml's "ORDERING FIX"
-comment for the full diagnosis -- pitch-shifting first pushes the
-voice's fundamental below the vocoder's filter bank's tuned range,
-causing erratic/"squeaky" output). The chain now runs `vocoder` FIRST
-(natural-register pitch tracking and formant shaping), THEN
-`pitch_shift` (transposing the whole finished vocoded signal down as a
-unit), THEN `bitcrush` (unaffected by this reordering, stays last).
+Magos briefly used a `vocoder` Effect Step instead of `ring_mod` (Slice
+36), but real-hardware testing found the vocoder destroyed voice
+intelligibility outright (it discards the input's own waveform and
+resynthesizes from a detected pitch plus a coarse envelope), and a
+follow-up "mix a sawtooth into the voice" experiment (`sawtooth_blend`)
+also failed on real hardware. Both were removed and Magos reverted to
+this ring_mod-based chain -- the last version confirmed to actually sound
+like a voice (see voices/magos.yaml's header comment for the full
+history).
 
 Following tests/test_deep_voice.py's precedent, this loads the REAL
 `voices/` directory shipped with the project (not a synthetic tmp_path
@@ -51,7 +36,7 @@ from voice_engine.bank import LoadVoiceBank
 VOICES_DIRECTORY_PATH = Path(__file__).parent.parent / "voices"
 
 
-def test_MagosVoiceShipsWithVocoderPitchShiftAndBitcrushChainInOrder() -> None:
+def test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder() -> None:
     voiceBank = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 
     magosVoice = next(voice for voice in voiceBank.voices if voice.id == "magos")
@@ -59,17 +44,13 @@ def test_MagosVoiceShipsWithVocoderPitchShiftAndBitcrushChainInOrder() -> None:
     assert magosVoice.default is False
     assert len(magosVoice.chain) == 3
 
-    vocoderStep, pitchShiftStep, bitcrushStep = magosVoice.chain
-
-    # No params required (see voice_engine/voice.py's ParseEffectStep and
-    # voice_engine/engine.py's CompileVocoderStep) -- just confirms the
-    # step is present, FIRST in the chain (see this file's module
-    # docstring's ORDER note -- vocoder must see the voice's natural,
-    # un-shifted pitch to track/shape it correctly).
-    assert vocoderStep.type == "vocoder"
+    pitchShiftStep, ringModStep, bitcrushStep = magosVoice.chain
 
     assert pitchShiftStep.type == "pitch_shift"
     assert pitchShiftStep.params["semitones"] < -6
+
+    assert ringModStep.type == "ring_mod"
+    assert ringModStep.params["frequency"] > 0
 
     assert bitcrushStep.type == "bitcrush"
     # Raised from an original <= 8 sanity bound: bit_depth had to go up to
