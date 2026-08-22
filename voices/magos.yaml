@@ -3,7 +3,8 @@ name: Magos
 default: false
 # The flagship cosplay character Voice (see CONTEXT.md's Voice Bank and
 # Deployment scope entries) -- a Warhammer 40K Magos-style robotic,
-# distorted voice. Chains pitch shift, ring modulation, bitcrush, and EQ.
+# distorted voice. Chains pitch shift, ring modulation, bitcrush, EQ,
+# gain, and a limiter.
 #
 # HISTORY: originally pitch_shift(-10) + ring_mod(35Hz) + bitcrush(10)
 # (Slice 22). Briefly replaced with a `vocoder` Effect Step (Slice 36),
@@ -11,6 +12,25 @@ default: false
 # follow-up "mix a sawtooth into the voice" experiment (`sawtooth_blend`)
 # also failed on real hardware. Both were removed and Magos reverted to
 # the ring_mod design.
+#
+# LOUDNESS (this version): real-hardware measurement found the retuned
+# chain below (pitch_shift/ring_mod/bitcrush/eq alone) was measurably
+# too quiet -- roughly 12x quieter than reference audio of the target
+# character. Chasing that full gap with `distortion` or a large `gain`
+# (tried: drive_db up to 45, gain_db up to 32) introduced real, confirmed
+# artifacts: `distortion` degraded pitch stability and amplified
+# background noise; a large `gain` produced an audible rhythmic
+# "ticking" and burst noise, traced to `pedalboard.Limiter`'s
+# gain-reduction memory resetting every ~139ms block (this project's
+# fixed per-block `reset=True` processing model -- see CLAUDE.md's
+# Real-time performance notes -- doesn't carry a limiter's envelope
+# state across blocks). DECISION: accept a smaller, clean gain boost
+# here (`gain_db: 10`, chosen because 8-12dB all showed a similar,
+# much-reduced boundary-artifact ratio versus 32dB's severe one, per
+# testing) rather than chase full loudness parity at the cost of audible
+# artifacts -- the user's live Master Volume slider already exists
+# specifically to cover the remaining gap, live and adjustably, without
+# needing this Voice's own chain to do all the work.
 #
 # RE-TUNED (this version) after properly analysing TWO independent
 # reference sources -- the original song used for ADR 0004, re-examined
@@ -88,3 +108,18 @@ chain:
     band: high
     cutoff_frequency_hz: 2500
     gain_db: 6
+  # gain_db 10: a clean, modest loudness boost -- NOT an attempt to
+  # match the reference's full measured loudness (that needed ~32dB and
+  # produced real rhythmic-ticking/burst-noise artifacts in testing, see
+  # this file's header comment). 8-12dB all measured similarly clean;
+  # 10 is the middle of that range. Push further with the live Master
+  # Volume slider, not by raising this value -- that's what it's for.
+  - type: gain
+    gain_db: 10
+  # REQUIRED alongside `gain`, not optional: even a modest gain_db can
+  # push real voice input's peaks past [-1.0, 1.0] on louder syllables,
+  # and this is NOT caught by ApplyMasterVolume's own limiter downstream,
+  # which is bypassed entirely at the default 100% Master Volume level
+  # (see CompileGainStep's docstring in voice_engine/engine.py).
+  - type: limiter
+    threshold_db: -1.0

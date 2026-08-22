@@ -12,11 +12,14 @@ Magos briefly used a `vocoder` Effect Step instead of `ring_mod` (Slice
 intelligibility outright, and a follow-up "mix a sawtooth into the
 voice" experiment (`sawtooth_blend`) also failed on real hardware. Both
 were removed and Magos reverted to this ring_mod-based chain, then
-RE-TUNED (pitch_shift depth, ring_mod frequency, and a new EQ step)
-after properly analysing reference audio and testing candidate chains
-against real recordings of the user's own voice -- see
-voices/magos.yaml's header comment for the full methodology and
-reasoning.
+RE-TUNED (pitch_shift depth, ring_mod frequency, a new EQ step, and
+finally a modest gain+limiter for loudness) after properly analysing
+reference audio and testing candidate chains against real recordings of
+the user's own voice -- see voices/magos.yaml's header comment for the
+full methodology and reasoning, including why a LARGE gain/distortion
+boost was tried and rejected (real, measured artifacts) in favor of a
+smaller clean boost plus the user's own Master Volume slider for the
+rest.
 
 Following tests/test_deep_voice.py's precedent, this loads the REAL
 `voices/` directory shipped with the project (not a synthetic tmp_path
@@ -37,15 +40,15 @@ from voice_engine.bank import LoadVoiceBank
 VOICES_DIRECTORY_PATH = Path(__file__).parent.parent / "voices"
 
 
-def test_MagosVoiceShipsWithPitchShiftRingModBitcrushAndEqChainInOrder() -> None:
+def test_MagosVoiceShipsWithFullRetunedChainInOrder() -> None:
     voiceBank = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 
     magosVoice = next(voice for voice in voiceBank.voices if voice.id == "magos")
 
     assert magosVoice.default is False
-    assert len(magosVoice.chain) == 4
+    assert len(magosVoice.chain) == 6
 
-    pitchShiftStep, ringModStep, bitcrushStep, eqStep = magosVoice.chain
+    pitchShiftStep, ringModStep, bitcrushStep, eqStep, gainStep, limiterStep = magosVoice.chain
 
     assert pitchShiftStep.type == "pitch_shift"
     # Deepened from an original -10 (see git history and
@@ -73,6 +76,20 @@ def test_MagosVoiceShipsWithPitchShiftRingModBitcrushAndEqChainInOrder() -> None
     assert eqStep.type == "eq"
     assert eqStep.params["band"] == "high"
     assert eqStep.params["gain_db"] > 0
+
+    assert gainStep.type == "gain"
+    # A DELIBERATELY modest boost -- a much larger value was tried and
+    # produced real, measured rhythmic-ticking/burst-noise artifacts
+    # (see voices/magos.yaml's header comment); this sanity bound exists
+    # to catch someone reintroducing that mistake, not to pin an exact
+    # value.
+    assert 0 < gainStep.params["gain_db"] <= 15
+
+    assert limiterStep.type == "limiter"
+    # REQUIRED alongside `gain` -- not caught by ApplyMasterVolume's own
+    # limiter, which is bypassed at the default 100% Master Volume level
+    # (see CompileGainStep's docstring in voice_engine/engine.py).
+    assert limiterStep.params["threshold_db"] < 0
 
 
 def test_SelectMagosVoiceSetsItAsActive() -> None:

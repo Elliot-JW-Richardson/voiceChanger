@@ -9,10 +9,11 @@ diagnostic Voices existed alongside finished ones.
 from pathlib import Path
 from typing import Any
 
+import pytest
 from flask.testing import FlaskClient
 
-from app import app
-from voice_engine.voice import LoadVoice
+from app import VOICE_BANK, app
+from voice_engine.voice import LoadVoice, Voice
 
 
 def test_VoiceWithTestFlagTrueParsesAsTest(tmp_path: Path) -> None:
@@ -50,7 +51,15 @@ chain: []
     assert voice.test is False
 
 
-def test_ListVoicesIncludesTestFlag() -> None:
+def test_ListVoicesIncludesTestFlag(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No test: true Voice ships permanently (see CONTEXT.md's
+    # "Diagnostic Voices" note -- they're temporary by design, added for
+    # one investigation and removed once it concludes), so a synthetic
+    # one is injected into the real VOICE_BANK for the duration of this
+    # test rather than depending on whichever happens to exist right now.
+    syntheticTestVoice = Voice(id="synthetic_test_voice", name="Synthetic", default=False, chain=[], test=True)
+    monkeypatch.setattr(VOICE_BANK, "voices", VOICE_BANK.voices + [syntheticTestVoice])
+
     client: FlaskClient = app.test_client()
 
     response = client.get("/voices")
@@ -60,8 +69,7 @@ def test_ListVoicesIncludesTestFlag() -> None:
 
     # A known finished (non-test) Voice reports False...
     assert voicesById["passthrough"]["test"] is False
-    # ...and a known diagnostic/WIP Voice reports True -- confirms the
-    # flag is actually wired through GET /voices, not just present and
-    # always False (see CONTEXT.md's "Diagnostic Voices" note for why
-    # test Voices exist at all).
-    assert voicesById["magos_distortion_moderate"]["test"] is True
+    # ...and the injected diagnostic/WIP Voice reports True -- confirms
+    # the flag is actually wired through GET /voices, not just present
+    # and always False.
+    assert voicesById["synthetic_test_voice"]["test"] is True
