@@ -9,13 +9,14 @@ Verification (from SLICES.md, Slice 22):
 
 Magos briefly used a `vocoder` Effect Step instead of `ring_mod` (Slice
 36), but real-hardware testing found the vocoder destroyed voice
-intelligibility outright (it discards the input's own waveform and
-resynthesizes from a detected pitch plus a coarse envelope), and a
-follow-up "mix a sawtooth into the voice" experiment (`sawtooth_blend`)
-also failed on real hardware. Both were removed and Magos reverted to
-this ring_mod-based chain -- the last version confirmed to actually sound
-like a voice (see voices/magos.yaml's header comment for the full
-history).
+intelligibility outright, and a follow-up "mix a sawtooth into the
+voice" experiment (`sawtooth_blend`) also failed on real hardware. Both
+were removed and Magos reverted to this ring_mod-based chain, then
+RE-TUNED (pitch_shift depth, ring_mod frequency, and a new EQ step)
+after properly analysing reference audio and testing candidate chains
+against real recordings of the user's own voice -- see
+voices/magos.yaml's header comment for the full methodology and
+reasoning.
 
 Following tests/test_deep_voice.py's precedent, this loads the REAL
 `voices/` directory shipped with the project (not a synthetic tmp_path
@@ -36,21 +37,30 @@ from voice_engine.bank import LoadVoiceBank
 VOICES_DIRECTORY_PATH = Path(__file__).parent.parent / "voices"
 
 
-def test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder() -> None:
+def test_MagosVoiceShipsWithPitchShiftRingModBitcrushAndEqChainInOrder() -> None:
     voiceBank = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 
     magosVoice = next(voice for voice in voiceBank.voices if voice.id == "magos")
 
     assert magosVoice.default is False
-    assert len(magosVoice.chain) == 3
+    assert len(magosVoice.chain) == 4
 
-    pitchShiftStep, ringModStep, bitcrushStep = magosVoice.chain
+    pitchShiftStep, ringModStep, bitcrushStep, eqStep = magosVoice.chain
 
     assert pitchShiftStep.type == "pitch_shift"
-    assert pitchShiftStep.params["semitones"] < -6
+    # Deepened from an original -10 (see git history and
+    # voices/magos.yaml's header comment) to land the user's own natural
+    # speaking pitch inside the reference's measured ~45-58Hz fundamental
+    # range.
+    assert pitchShiftStep.params["semitones"] < -10
 
     assert ringModStep.type == "ring_mod"
-    assert ringModStep.params["frequency"] > 0
+    # Retuned to sit close to the expected post-shift fundamental itself
+    # (rather than an arbitrary "robotic buzz" frequency) -- see
+    # voices/magos.yaml's header comment for why this specific
+    # relationship matters (it's what reproduces the reference's
+    # 2nd-harmonic-dominant signature).
+    assert 40 <= ringModStep.params["frequency"] <= 70
 
     assert bitcrushStep.type == "bitcrush"
     # Raised from an original <= 8 sanity bound: bit_depth had to go up to
@@ -59,6 +69,10 @@ def test_MagosVoiceShipsWithPitchShiftRingModAndBitcrushChainInOrder() -> None:
     # CONTEXT.md's Effect palette entry on pedalboard.Bitcrush's
     # fixed-scale quantization).
     assert 1 <= bitcrushStep.params["bit_depth"] <= 12
+
+    assert eqStep.type == "eq"
+    assert eqStep.params["band"] == "high"
+    assert eqStep.params["gain_db"] > 0
 
 
 def test_SelectMagosVoiceSetsItAsActive() -> None:

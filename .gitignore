@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .idea/
 .pytest_cache/
+
+# Reference audio (e.g. YouTube-sourced character reference tracks) --
+# kept locally for spectral analysis, never committed: copyrighted
+# third-party material, not something that belongs in a public repo.
+reference_audio/

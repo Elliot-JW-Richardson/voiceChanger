@@ -3,42 +3,88 @@ name: Magos
 default: false
 # The flagship cosplay character Voice (see CONTEXT.md's Voice Bank and
 # Deployment scope entries) -- a Warhammer 40K Magos-style robotic,
-# distorted voice. Chains pitch shift, ring modulation, and bitcrush, per
-# CONTEXT.md's example dialogue: "Chain a pitch shift with ring modulation
-# and some distortion -- those are just more Effect Steps in the same
-# list."
+# distorted voice. Chains pitch shift, ring modulation, bitcrush, and EQ.
 #
-# REVERTED from a vocoder-based chain (Slice 36) back to this known-good
-# ring_mod design: real-hardware testing found the vocoder Effect Step
-# destroyed voice intelligibility outright (it discards the input's own
-# waveform and resynthesizes from a detected pitch plus a coarse 4-band
-# envelope -- see voice_engine/engine.py's CompileVocoderStep docstring),
-# and a follow-up "mix a sawtooth into the voice instead" experiment
-# (sawtooth_blend) was tried and also failed on real hardware (extremely
-# loud output, no audible speech). Both attempts are removed rather than
-# left half-working. This chain is the last version confirmed to actually
-# sound like a voice; the vocoder/electronic-texture idea is on hold
-# pending a more careful analysis of the original reference track (see
-# ADR 0004) before trying again.
+# HISTORY: originally pitch_shift(-10) + ring_mod(35Hz) + bitcrush(10)
+# (Slice 22). Briefly replaced with a `vocoder` Effect Step (Slice 36),
+# which real-hardware testing found destroyed intelligibility outright; a
+# follow-up "mix a sawtooth into the voice" experiment (`sawtooth_blend`)
+# also failed on real hardware. Both were removed and Magos reverted to
+# the ring_mod design.
+#
+# RE-TUNED (this version) after properly analysing TWO independent
+# reference sources -- the original song used for ADR 0004, re-examined
+# more carefully, plus a second, unrelated spoken-word reference -- and,
+# critically, testing candidate chains against actual recordings of the
+# user's own voice rather than synthetic test tones (see
+# reference_audio/, a local-only gitignored folder, not committed).
+#
+# KEY CORRECTION TO ADR 0004: the original analysis described the
+# reference's fundamental as "moving with the melody." Re-analysis with
+# a proper pitch tracker (librosa pYIN) across both references shows the
+# fundamental is actually mostly FLAT at a low resting pitch (~45-58Hz),
+# with brief rises at stressed syllables/phrase onsets before settling
+# back down -- ordinary speech prosody pitched down onto a low register,
+# not a moving melody. That's architecturally much closer to what a
+# FIXED-frequency carrier (ring_mod) produces than what the vocoder
+# (built for continuous per-block pitch TRACKING) was designed for --
+# a real factor in why the vocoder rebuild was unnecessary complexity.
+#
+# METHOD: measured the reference's fundamental range (~45-58Hz median
+# across both sources), then computed the pitch-shift depth needed to
+# land the user's own natural speaking pitch (~121Hz median, measured
+# from two separate recordings) into that range. Additionally found,
+# via direct FFT analysis of a stable pitch region, that the reference's
+# 2nd harmonic is LOUDER than its fundamental -- and confirmed, by
+# testing against the user's real voice, that this happens naturally
+# when ring_mod's carrier frequency is set equal to the shifted voice's
+# own fundamental (multiplying a signal by a carrier at its own
+# frequency pushes the fundamental's energy up into the 2nd harmonic).
+# Verified the whole chain's output against the reference's measured
+# profile (fundamental, spectral centroid, 85%-energy rolloff, 2nd-vs-
+# 1st-harmonic ratio) across BOTH of the user's voice recordings before
+# shipping this -- not just a single synthetic-tone sanity check, the
+# mistake that led to the vocoder's undetected failure.
 chain:
-  # -10 semitones: noticeably deeper/more extreme than Deep Voice's -6, so
-  # Magos reads as a distinct, more inhuman register rather than just a
-  # louder version of Deep.
+  # -14 semitones (deepened from -10): -10 only lands the user's ~121Hz
+  # natural median pitch at ~68Hz, above the reference's measured
+  # ~45-58Hz range entirely. -14 lands it at ~54Hz, inside that range --
+  # verified against two separate recordings of the user's voice (54.4Hz
+  # and 56.0Hz measured output fundamental respectively).
   - type: pitch_shift
-    semitones: -10
-  # 35 Hz: in the tens-of-Hz range this project's ring-mod tests use for a
-  # metallic/robotic buzz (see tests/test_ring_mod_step.py) -- audible as
-  # texture on top of the voice without turning it into pure noise.
+    semitones: -14
+  # 54 Hz (retuned from 35Hz): set equal to the TARGET fundamental
+  # (~54Hz) rather than an arbitrary "robotic buzz" frequency. This is
+  # the single biggest factor in matching the reference's measured
+  # harmonic shape -- at 35Hz (unrelated to the shifted voice's own
+  # ~54-68Hz fundamental) the old chain's ring_mod sidebands didn't
+  # reinforce anything and left the pitch tracker reading a confused
+  # ~34Hz beat artifact, nowhere near the target. At 54Hz, ring_mod's
+  # multiply pushes the fundamental's energy up into the 2nd harmonic --
+  # measured 2nd/1st harmonic energy ratio ~3.3-3.4 against the user's
+  # real voice, matching the reference's own "2nd harmonic louder than
+  # the fundamental" signature. If you ever change `semitones` above,
+  # re-tune this to match your new expected output fundamental (roughly
+  # `your natural median pitch * 2^(semitones/12)`), not a random value.
   - type: ring_mod
-    frequency: 35
-  # bit_depth 10 (raised from an initial 5 -- see git history and
-  # CONTEXT.md's Effect palette entry): pedalboard.Bitcrush quantizes in
-  # FIXED steps across the full [-1, 1] range, not relative to the actual
-  # signal's amplitude. bit_depth 5 sounded fine against a full-scale test
-  # tone but collapsed real (quiet) microphone input to only 3-4 distinct
-  # values total -- heard as buzzy squeaks, not a voice. 10 keeps
-  # meaningful grit at full volume while staying intelligible at realistic
-  # quiet input levels. Re-tune by ear if your mic input level changes
-  # (e.g. after adjusting OS/hardware input gain).
+    frequency: 54
+  # bit_depth 10: unchanged from the original chain (see git history) --
+  # still keeps meaningful grit at full volume while staying intelligible
+  # on realistic quiet mic input (pedalboard.Bitcrush quantizes in FIXED
+  # steps across [-1, 1], not relative to signal amplitude -- see
+  # CONTEXT.md's Effect palette entry).
   - type: bitcrush
     bit_depth: 10
+  # High-shelf +6dB @2500Hz: the reference shows real broadband energy
+  # up to ~5.7kHz (85%-energy rolloff) that pitch_shift+ring_mod+bitcrush
+  # alone don't fully reach on real voice input (measured output rolloff
+  # only ~4.7kHz without this step). This boost is what closed that gap
+  # in testing (measured output rolloff ~6.0-6.8kHz with it) -- genuine
+  # brightness/grit in the target's upper spectrum, not just a "make it
+  # louder" EQ move. Lowering bitcrush's bit_depth further was tried
+  # first and made things DARKER instead of brighter, the opposite of
+  # what was needed -- worth remembering if re-tuning this again.
+  - type: eq
+    band: high
+    cutoff_frequency_hz: 2500
+    gain_db: 6
