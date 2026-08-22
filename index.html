@@ -106,6 +106,16 @@
                 document.getElementById('noiseGateSlider').value = data.level;
             }
 
+            const noiseGateSlider = document.getElementById('noiseGateSlider');
+            noiseGateSlider.addEventListener('change', async () => {
+                const newLevel = parseInt(noiseGateSlider.value, 10);
+                await fetch('/noise_gate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ level: newLevel })
+                });
+            });
+
             // Initial status
             refreshStatus();
             renderVoiceList();
