@@ -20,6 +20,14 @@ cross-thread hazard applies once Slice 14 reads it from the audio
 callback while a Flask request thread sets it, so it follows the same
 lock-guarded pattern.
 
+NoiseGateHolder (Slice 26) tracks the single global Noise Gate
+sensitivity level (see CONTEXT.md's Noise Gate entry) -- the mirror
+image of MasterVolumeHolder, applied to the raw microphone input
+BEFORE a Voice's Effect Step chain instead of after it. The same
+cross-thread hazard applies once Slice 27 reads it from the audio
+callback while a Flask request thread sets it, so it follows the same
+lock-guarded pattern.
+
 Deliberately minimal: no pub/sub, no callbacks-on-change, no
 persistence -- just thread-safe get/set holders.
 """
@@ -69,5 +77,33 @@ class MasterVolumeHolder:
 
     def Set(self, level: int) -> None:
         """Set the current Master Volume level."""
+        with self.lock:
+            self.level = level
+
+
+class NoiseGateHolder:
+    """Holds the single global Noise Gate sensitivity level (a
+    percentage, later range-validated 0-100% in Slice 30 -- see
+    CONTEXT.md's Noise Gate entry), guarded by a lock so it can be
+    safely read and set from different threads.
+
+    Defaults to 0% (gate fully open, no gating), matching this
+    project's convention of a "no effect" default -- the mirror image
+    of MasterVolumeHolder's 100% (unity gain) default. Deliberately
+    does no range validation/clamping here -- that's Slice 30's job,
+    not this one, mirroring MasterVolumeHolder's own precedent (Slice
+    17 owns its range validation)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.level = 0
+
+    def Get(self) -> int:
+        """Return the current Noise Gate level."""
+        with self.lock:
+            return self.level
+
+    def Set(self, level: int) -> None:
+        """Set the current Noise Gate level."""
         with self.lock:
             self.level = level

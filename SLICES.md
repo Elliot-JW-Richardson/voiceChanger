@@ -369,7 +369,7 @@
 
 **Completion promise:** `SLICE_26_DONE`
 **Depends on:** none
-**Status:** todo
+**Status:** done
 
 ## Slice 27 — Live audio gated before the Voice chain  _(Component: Runtime)_
 
