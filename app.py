@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -149,13 +150,30 @@ def StartRecording() -> Response:
     # active at the moment recording started (documented workflow:
     # stop/restart recording when switching Voices, don't switch
     # mid-take).
-    activeVoiceId = ACTIVE_VOICE_HOLDER.Get().id
-    RECORDING_HOLDER.Start(activeVoiceId)
-    return jsonify({"status": "ok", "voiceId": activeVoiceId})
+    activeVoice = ACTIVE_VOICE_HOLDER.Get()
+    # A filename alone doesn't capture enough to correctly interpret a
+    # recording later -- real-hardware testing found Master Volume/Noise
+    # Gate levels materially change a recording's noise/loudness
+    # characteristics, and this project's Voice chains have already
+    # changed multiple times mid-investigation. Snapshot everything that
+    # could affect the audio, at the moment the take starts (see
+    # RecordingHolder's docstring for the full reasoning).
+    settingsSnapshot = {
+        "voiceId": activeVoice.id,
+        "voiceName": activeVoice.name,
+        "chain": [{"type": step.type, "params": step.params} for step in activeVoice.chain],
+        "masterVolume": MASTER_VOLUME_HOLDER.Get(),
+        "noiseGate": NOISE_GATE_HOLDER.Get(),
+        "sampleRate": SAMPLE_RATE,
+        "blockSize": BLOCKSIZE,
+        "startedAt": datetime.now().isoformat(),
+    }
+    RECORDING_HOLDER.Start(activeVoice.id, settingsSnapshot)
+    return jsonify({"status": "ok", "voiceId": activeVoice.id})
 
 @app.route("/recordings/stop", methods=["POST"])
 def StopRecording() -> Response:
-    wasActive, voiceLabel, blocks = RECORDING_HOLDER.Stop()
+    wasActive, voiceLabel, settings, blocks = RECORDING_HOLDER.Stop()
     if not wasActive:
         return jsonify({"status": "not_recording"})
 
@@ -166,6 +184,13 @@ def StopRecording() -> Response:
     filename = f"{voiceLabel}_{timestamp}.wav"
     filePath = RECORDINGS_DIRECTORY_PATH / filename
     SaveRecordingWav(blocks, SAMPLE_RATE, str(filePath))
+
+    # Sidecar JSON, same filename stem, carrying the settings snapshot
+    # captured at Start() -- see StartRecording's comment for why a
+    # filename alone isn't enough.
+    settingsFilePath = filePath.with_suffix(".json")
+    settingsFilePath.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
     return jsonify({"status": "ok", "filename": filename})
 
 @app.route("/recordings", methods=["GET"])
@@ -176,7 +201,18 @@ def ListRecordings() -> Response:
         reverse=True,  # newest first -- matches the "don't get confused
         # with stale examples" workflow this was built for.
     )
-    return jsonify({"recordings": [path.name for path in recordingFiles]})
+
+    def LoadSettings(wavPath: Path) -> dict:
+        settingsFilePath = wavPath.with_suffix(".json")
+        if not settingsFilePath.exists():
+            return {}
+        return json.loads(settingsFilePath.read_text(encoding="utf-8"))
+
+    recordings = [
+        {"filename": path.name, "settings": LoadSettings(path)}
+        for path in recordingFiles
+    ]
+    return jsonify({"recordings": recordings})
 
 @app.route("/recordings/<filename>", methods=["GET"])
 def GetRecording(filename: str) -> Response:
@@ -188,6 +224,12 @@ def ClearRecordings() -> Response:
     recordingFiles = list(RECORDINGS_DIRECTORY_PATH.glob("*.wav"))
     for path in recordingFiles:
         path.unlink()
+        # Delete the settings sidecar alongside its recording, if one
+        # exists -- otherwise "clear all" would leave orphaned .json
+        # files behind after their .wav is gone.
+        settingsFilePath = path.with_suffix(".json")
+        if settingsFilePath.exists():
+            settingsFilePath.unlink()
     return jsonify({"status": "ok", "cleared": len(recordingFiles)})
 
 @app.route("/start", methods=["POST"])

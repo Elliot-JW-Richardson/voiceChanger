@@ -133,6 +133,18 @@ class RecordingHolder:
     active when recording started (see this module's docstring for why
     buffering in memory, not writing to disk here).
 
+    Also carries an arbitrary `settings` snapshot (Master Volume level,
+    Noise Gate level, the active Voice's full id/name/chain, sample
+    rate -- whatever app.py decides is worth recording) captured at the
+    same moment as `voiceLabel`. Added after real-hardware testing
+    (Noise Gate at 0% during a set of otherwise-unrelated recordings)
+    made it clear a filename alone doesn't capture enough to correctly
+    interpret a recording later, especially given how many times this
+    project's Voice chains have already changed mid-investigation --
+    without a durable settings snapshot, a recording's filename could
+    describe a Voice whose actual chain parameters no longer match what
+    was true when the recording was made.
+
     Inactive (not recording) by default. `Start` clears any previous
     buffer -- only one recording is tracked at a time, matching this
     project's single-Voice/single-Stream simplicity elsewhere (no
@@ -142,15 +154,19 @@ class RecordingHolder:
         self.lock = threading.Lock()
         self.active = False
         self.voiceLabel: Optional[str] = None
+        self.settings: dict = {}
         self.blocks: list[AudioBlock] = []
 
-    def Start(self, voiceLabel: str) -> None:
+    def Start(self, voiceLabel: str, settings: dict) -> None:
         """Begin a new recording labeled with `voiceLabel` (the active
-        Voice's id at the moment recording starts), discarding any
-        previously buffered blocks."""
+        Voice's id at the moment recording starts) and carrying
+        `settings` (an arbitrary, JSON-serializable snapshot of whatever
+        else is worth recording alongside it -- see this class's
+        docstring), discarding any previously buffered blocks."""
         with self.lock:
             self.active = True
             self.voiceLabel = voiceLabel
+            self.settings = settings
             self.blocks = []
 
     def IsActive(self) -> bool:
@@ -166,16 +182,19 @@ class RecordingHolder:
             if self.active:
                 self.blocks.append(block.copy())
 
-    def Stop(self) -> tuple[bool, Optional[str], list[AudioBlock]]:
+    def Stop(self) -> tuple[bool, Optional[str], dict, list[AudioBlock]]:
         """Stop the current recording (if any), returning
-        `(wasActive, voiceLabel, blocks)` -- `wasActive` is False (and
-        `voiceLabel`/`blocks` empty) if no recording was in progress.
-        Resets to the inactive/empty state regardless."""
+        `(wasActive, voiceLabel, settings, blocks)` -- `wasActive` is
+        False (and `voiceLabel`/`settings`/`blocks` empty) if no
+        recording was in progress. Resets to the inactive/empty state
+        regardless."""
         with self.lock:
             wasActive = self.active
             voiceLabel = self.voiceLabel
+            settings = self.settings
             blocks = self.blocks
             self.active = False
             self.voiceLabel = None
+            self.settings = {}
             self.blocks = []
-        return wasActive, voiceLabel, blocks
+        return wasActive, voiceLabel, settings, blocks

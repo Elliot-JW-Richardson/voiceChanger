@@ -172,17 +172,25 @@
                 const listEl = document.getElementById('recordingList');
                 listEl.innerHTML = '';
 
-                data.recordings.forEach((filename) => {
+                data.recordings.forEach((recording) => {
                     const item = document.createElement('div');
                     item.classList.add('recording-item');
 
                     const label = document.createElement('span');
-                    label.textContent = filename;
+                    const settings = recording.settings || {};
+                    // Settings sidecar (see app.py's StartRecording) --
+                    // shows what was actually active during this take,
+                    // not just which Voice, so old recordings can't get
+                    // confused with a differently-configured new one.
+                    const settingsSummary = settings.voiceName
+                        ? ` (vol ${settings.masterVolume}%, gate ${settings.noiseGate}%)`
+                        : '';
+                    label.textContent = recording.filename + settingsSummary;
                     item.appendChild(label);
 
                     const audio = document.createElement('audio');
                     audio.controls = true;
-                    audio.src = `/recordings/${filename}`;
+                    audio.src = `/recordings/${recording.filename}`;
                     item.appendChild(audio);
 
                     listEl.appendChild(item);
