@@ -452,7 +452,7 @@
 
 **Completion promise:** `SLICE_32_DONE`
 **Depends on:** none
-**Status:** todo
+**Status:** done
 
 ## Slice 33 — Vocoder Effect Step: pitch-tracked sawtooth carrier  _(Component: Vocoder)_
 
