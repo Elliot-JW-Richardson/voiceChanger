@@ -351,7 +351,7 @@
 
 **Completion promise:** `SLICE_25_DONE`
 **Depends on:** Slice 23, Slice 24
-**Status:** todo
+**Status:** done
 
 ---
 

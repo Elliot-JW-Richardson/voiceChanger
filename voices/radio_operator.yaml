@@ -1,0 +1,42 @@
+id: radio_operator
+name: Radio Operator
+default: false
+# A comms-radio character Voice rounding out the example Voice Bank (see
+# SLICES.md Slice 25), combining EQ and reverb -- the two Effect palette
+# types shipped most recently -- with bitcrush to build a distinct,
+# thematically coherent "voice coming through a handset" character,
+# rather than a distorted/robotic one like Magos.
+chain:
+  # Low-shelf cut: rolls bass off below 400 Hz. Real radio-handset
+  # speakers can't reproduce low frequencies, so cutting them (rather
+  # than boosting, as Magos-style Voices might) is what actually reads
+  # as "thin radio speaker" instead of "deep robotic".
+  - type: eq
+    band: low
+    cutoff_frequency_hz: 400
+    gain_db: -12
+  # High-shelf cut: rolls treble off above 3000 Hz. Paired with the
+  # low-shelf cut above, this band-limits the voice to roughly the
+  # narrow ~400-3000 Hz passband a real narrowband radio transmission
+  # squeezes speech through, instead of full-range mic bandwidth.
+  - type: eq
+    band: high
+    cutoff_frequency_hz: 3000
+    gain_db: -12
+  # bit_depth 8: sits between Magos's 10 (tuned for intelligibility at
+  # quiet mic levels -- see voices/magos.yaml and CONTEXT.md's Effect
+  # palette entry on pedalboard.Bitcrush's fixed-scale quantization) and
+  # a harsher lower value. Slightly grittier than Magos on purpose --
+  # radio static crackle is a stronger, more foregrounded texture than
+  # Magos's mechanical buzz -- while staying clearly above the point
+  # where quiet real mic input collapses to only a few distinct values.
+  - type: bitcrush
+    bit_depth: 8
+  # Small, tight reverb: wet_level 0.2 and room_size 0.2 add just enough
+  # boxy resonance to suggest a small speaker cabinet/handset earpiece,
+  # not a hall or open room -- kept modest so it reads as "enclosed
+  # space" texture rather than washing out the band-limited, crackly
+  # voice underneath it.
+  - type: reverb
+    wet_level: 0.2
+    room_size: 0.2
