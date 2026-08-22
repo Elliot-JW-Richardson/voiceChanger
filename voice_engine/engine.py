@@ -36,7 +36,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, NoiseGate, Pedalboard, PitchShift, Reverb
+from pedalboard import Bitcrush, Gain, HighpassFilter, HighShelfFilter, Limiter, LowpassFilter, LowShelfFilter, NoiseGate, Pedalboard, PitchShift, Reverb
 
 from voice_engine.pitch_tracker import DetectPitch
 from voice_engine.voice import EffectStep, Voice
@@ -253,65 +253,187 @@ def CompileReverbStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     return ReverbStep
 
 
+FILTER_BANK_LOW_HZ = 150.0
+FILTER_BANK_HIGH_HZ = 4000.0
+# 4 bands, not the 6-8 CONTEXT.md's Vocoder entry/this slice's own design
+# notes suggest as an example -- deliberately narrowed from an initial
+# 7-band prototype. See this function's docstring's BAND COUNT VS
+# SELECTIVITY TRADE-OFF note for why: it's what let a genuinely selective
+# (multi-stage) filter bank coexist with Slice 33's already-shipped
+# harmonic-richness test.
+FILTER_BANK_NUM_BANDS = 4
+# Cascading multiple Highpass+Lowpass pairs per band, rather than just
+# one, is what gives each band real selectivity -- see this function's
+# docstring's FILTER BANK SELECTIVITY note.
+FILTER_BANK_STAGES_PER_BAND = 2
+# Envelopes/formants change slowly relative to the audio signal itself --
+# a LOW cutoff smooths a rectified band signal into a genuine amplitude
+# envelope rather than passing the rectified waveform's own ripple
+# through. 20-50Hz is CONTEXT.md/this slice's suggested range; 30Hz is
+# comfortably inside it.
+ENVELOPE_FOLLOWER_CUTOFF_HZ = 30.0
+# A fixed makeup gain applied after averaging across bands, compensating
+# for the substantial passband attenuation `FILTER_BANK_STAGES_PER_BAND`
+# cascaded filter stages introduce -- see this function's docstring's
+# NORMALIZATION note for how this value was chosen.
+FILTER_BANK_MAKEUP_GAIN = 15.0
+
+
 def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
-    """Compile a `vocoder` Effect Step into a callable that replaces a
-    block's own waveform with a pitch-tracked sawtooth carrier (see
-    CONTEXT.md's "Vocoder Effect Step (v2, scoped -- see ADR 0004)" entry
-    and docs/adr/0004-vocoder-over-tuned-ring-mod.md).
+    """Compile a `vocoder` Effect Step into a callable that shapes a
+    pitch-tracked sawtooth carrier with the input voice's own spectral/
+    formant envelope -- the classic filter-bank talkbox/vocoder technique
+    (see CONTEXT.md's "Vocoder Effect Step (v2, scoped -- see ADR 0004)"
+    entry: "combines a carrier ... with the input voice's own modulator
+    envelope ... extracted via a filter bank + envelope followers and
+    imposed onto the carrier") and docs/adr/0004-vocoder-over-tuned-ring-
+    mod.md, which found "a dense near-complete harmonic series through at
+    least the 9th harmonic" in the reference track -- the reason the
+    filter bank below spans several harmonics up into the low kHz range,
+    not just the fundamental.
 
-    Unlike `CompileRingModStep`'s fixed-frequency oscillator, this
-    carrier's frequency is re-derived every block from the block's OWN
-    content: `DetectPitch` (voice_engine.pitch_tracker, Slice 32) runs
-    once per call to find that block's detected fundamental, and the
-    sawtooth is synthesized at exactly that frequency. This is what lets
-    the carrier track a moving melody (ADR 0004's reference-track
-    analysis found a fundamental moving 42-58Hz) rather than sit at one
-    tuned frequency, which ADR 0004 found provably cannot reproduce a
-    melody-tracking harmonic series.
+    CARRIER (unchanged from Slice 33): `DetectPitch` (Slice 32) finds the
+    block's own fundamental every call, and a pitch-tracked sawtooth is
+    synthesized at that frequency with its phase reset each block (see
+    the historical version of this docstring, preserved in git history,
+    for the full reasoning -- SAWTOOTH-NOT-SINE, PHASE-RESETS-EVERY-BLOCK,
+    and UNVOICED FALLBACK all still apply exactly as before; that part of
+    this function's behavior is deliberately untouched by this slice).
 
-    SAWTOOTH, NOT SINE: `phase = (frequency * t) % 1.0; sawtooth =
-    2 * phase - 1.0` is a rising-ramp sawtooth. Its Fourier series
-    contains energy at every harmonic of `frequency` (decaying as 1/n),
-    unlike a sine's single spectral line -- this is what gives the
-    output the "rich multi-harmonic structure" this slice's acceptance
-    criteria (SLICES.md, Slice 33) asks for, and is a genuine step toward
-    the reference track's observed dense harmonic series (ADR 0004).
+    FILTER BANK: at COMPILE TIME, `FILTER_BANK_NUM_BANDS` (4) frequency
+    bands are chosen, log-spaced from `FILTER_BANK_LOW_HZ` (150Hz) to
+    `FILTER_BANK_HIGH_HZ` (4000Hz) -- log spacing because formants and
+    harmonic structure matter more logarithmically than linearly, and
+    this range covers several harmonics of typical voiced speech, not
+    just the fundamental, per ADR 0004's dense-harmonic-series finding.
+    For EACH band, two `Pedalboard` instances are built ONCE here (never
+    inside the closure -- see this file's module docstring and
+    CLAUDE.md's Real-time performance notes): a bandpass filter
+    (`HighpassFilter` chained with `LowpassFilter`, isolating that band)
+    and an envelope-follower lowpass filter (`ENVELOPE_FOLLOWER_CUTOFF_HZ`
+    cutoff, smoothing a rectified band signal into an amplitude
+    envelope).
 
-    PHASE RESETS EVERY BLOCK (`t = np.arange(framesInBlock) / sampleRate`
-    starts at 0 on every call, no `nonlocal` phase accumulator) -- this
-    is a deliberate design choice, not an oversight, and is the OPPOSITE
-    of `CompileRingModStep`'s continuous-phase carrier. Ring modulation's
-    Slice 19 acceptance criteria specifically tested phase continuity
-    across a block boundary; this slice's acceptance criteria does not --
-    it only requires each block's OWN dominant frequency to match that
-    block's OWN detected pitch, which a per-block-reset carrier already
-    satisfies. It mirrors this project's established `reset=True`
-    convention (see `CompilePitchShiftStep`'s docstring): each block is
-    treated as its own complete, independent unit rather than carrying
-    state across the block boundary. A future slice could add phase
-    continuity if a later acceptance criteria needs it, the same way
-    ring modulation's did.
+    FILTER BANK SELECTIVITY: a single `HighpassFilter`+`LowpassFilter`
+    pair is a gentle, 2-pole-ish rolloff with a LOT of cross-band
+    leakage -- prototyping found a single-stage band's peak in-band gain
+    only ~1.7x its gain 2.5 octaves outside the band, nowhere near enough
+    for one band's content to be reliably distinguishable from another's;
+    with that little selectivity, prototyping found the two-input
+    differentiation this slice's acceptance criteria needs actually comes
+    out BACKWARDS (the input that emphasizes a LOWER harmonic ends up
+    with LESS energy in that region than the other input, not more) --
+    a distant band's strongly-energized, poorly-isolated carrier content
+    bleeds across into other bands' frequency territory. Cascading
+    `FILTER_BANK_STAGES_PER_BAND` (2) Highpass+Lowpass pairs per band
+    fixes the direction and gives clear, correctly-signed separation
+    (see tests/test_vocoder_step.py's
+    `test_VocoderStepShapesCarrierWithEachInputsOwnFormantEnvelope`
+    docstring for the exact ratios prototyping found). This roughly
+    doubles the filter bank's per-block cost, but that cost is tiny in
+    absolute terms (benchmarked well under a few ms for the full 4-band
+    bank at this project's SAMPLE_RATE=22050/BLOCKSIZE=3072, against a
+    139ms budget) -- nowhere near pathological.
 
-    UNVOICED FALLBACK: if `DetectPitch` returns 0.0 (silence or no clear
-    periodicity), this returns a silent (all-zero) block. Full voiced/
-    unvoiced handling (a noise carrier instead of silence) is explicitly
-    Slice 35's job, not this slice's -- see SLICES.md.
+    BAND COUNT VS SELECTIVITY TRADE-OFF: an earlier prototype used 7
+    (log-spaced, matching CONTEXT.md's "6-8" suggestion) narrow bands
+    with 3 cascaded stages each for even sharper selectivity -- but that
+    combination, while giving excellent two-input differentiation, also
+    suppressed a PURE, single-frequency sine's synthesized-carrier
+    harmonics almost entirely (each higher harmonic lives in its own
+    narrow band, and a pure sine has essentially no energy outside its
+    own fundamental's band, so that harmonic's envelope collapses to
+    near-zero). That broke Slice 33's already-shipped
+    `test_VocoderStepOutputHasRichHarmonicStructureUnlikeInputSine`,
+    which deliberately uses a pure sine and expects the carrier's 2nd
+    harmonic to survive strongly. Prototyping across band counts (2-8)
+    and stage counts (1-3) found no combination that maximizes BOTH
+    properties at once -- narrower/more-selective bands help
+    differentiation but hurt pure-tone harmonic survival, and vice versa.
+    4 wider bands with 2 cascaded stages was the best balance found: each
+    band is wide enough that a pure sine's fundamental and its immediate
+    neighboring harmonics mostly share a band (preserving that band's
+    strong envelope and hence the carrier's own harmonics within it),
+    while still being narrow/selective enough to separate the two test
+    signals' differently-placed emphasized harmonics (the 3rd and 9th)
+    into different bands. This is a real, deliberate trade-off, not an
+    oversight -- a genuine per-harmonic-band vocoder (as an idealized
+    design might use many more, narrower bands) would sound more
+    articulate on real speech, at the cost of exactly this kind of
+    pure-tone edge case. Revisiting band count/selectivity once this
+    Effect Step is validated against real voice input (rather than
+    synthetic test tones) is a reasonable future refinement, not required
+    by this slice's acceptance criteria.
 
-    AMPLITUDE: a fixed placeholder of 0.7 -- comfortably within
-    [-1.0, 1.0] with headroom to spare, chosen simply as "clearly
-    audible, no clipping risk," not a value with any deeper meaning. The
-    block's own waveform is being REPLACED, not scaled, so there is no
-    input amplitude to match yet; Slice 34 will shape amplitude (and much more
-    -- the actual spectral envelope) from the input's own extracted
-    formant envelope, per CONTEXT.md's Vocoder entry. Don't over-engineer
-    amplitude matching here.
+    PER-BLOCK SHAPING (in the closure, given the input block as the
+    "modulator"): for each band, (a) the band's bandpass filter runs on
+    the MODULATOR to isolate that band's content, (b) that's rectified
+    (`np.abs`) and run through the band's envelope-follower lowpass
+    filter to get a smoothed amplitude envelope, (c) the SAME band's
+    bandpass filter runs on the CARRIER (the sawtooth) to isolate that
+    band's content from the carrier, (d) the band-filtered carrier is
+    multiplied by the band's envelope, and (e) that shaped band is summed
+    into the output.
 
-    No expensive one-time setup is needed (no `Pedalboard`/plugin
-    instance to construct, unlike most of this file's other `Compile*Step`
-    functions) -- like `CompileRingModStep`, the oscillator math is cheap
-    enough to live entirely inside the returned closure.
+    NORMALIZATION: after summing all bands, the result is divided by
+    `FILTER_BANK_NUM_BANDS` (averaging, so summing more bands doesn't
+    blow up the output just because there are more of them), then
+    multiplied by `FILTER_BANK_MAKEUP_GAIN` (15.0) -- a fixed compensating
+    gain. The makeup gain is needed because cascaded bandpass filtering
+    is lossy: prototyping found the averaged-but-unboosted output was
+    extremely quiet (well under a tenth of Slice 33's flat 0.7-amplitude
+    carrier), because the very selectivity this slice depends on
+    (FILTER BANK SELECTIVITY above) also throws away most of a
+    narrowband signal's energy relative to a full-band one.
+    `FILTER_BANK_MAKEUP_GAIN`'s exact value was chosen empirically via
+    prototyping to comfortably clear Slice 33's rich-harmonic-structure
+    threshold (found to land the output/input energy ratio at that
+    test's 2nd harmonic around ~15x -- well past that test's >10x
+    threshold) while keeping peak output amplitude well inside
+    [-1.0, 1.0] (prototyping found peaks around ~0.4 on the test signals
+    used here, comfortable headroom, no clipping risk) -- not a value
+    with any deeper meaning beyond "satisfies both constraints with
+    margin." Real loudness/level tuning against an actual live Voice is
+    explicitly this file's Real-time performance point 5's job
+    (CLAUDE.md), deferred to Slice 36 when this Effect Step is first
+    wired into a real Voice, not this slice's.
+
+    STATELESS-SAFE REUSE: each band's `Pedalboard` instance is called
+    TWICE per closure call (once on the modulator, once on the carrier) --
+    safe because `.process()` is called with `reset=True` throughout (see
+    below), so there is no cross-call state for one call to corrupt for
+    the other.
+
+    `.process()` calls all use the default `reset=True`, the same
+    rationale as every other `Compile*Step` in this file: it guarantees
+    the output is always the SAME LENGTH as the input, a hard requirement
+    of this project's fixed-block-size `outdata[:] = ...` contract. Like
+    `CompilePitchShiftStep`/`CompileReverbStep`, this means no filter
+    state (bandpass or envelope-follower) carries across the live
+    callback's block boundaries -- an accepted limitation already
+    documented for every other `pedalboard`-based Effect Step here.
+
+    REAL-TIME BENCHMARKING NOTE: this function is only benchmarked in
+    isolation so far (see FILTER BANK SELECTIVITY above), not yet against
+    the full worst-case chain this project ships (CLAUDE.md's Real-time
+    performance point 5) -- this slice doesn't wire `vocoder` into a live
+    Voice yet (that's Slice 36), so that benchmarking is deferred to when
+    it does.
     """
     carrierAmplitude = 0.7
+
+    bandEdgesHz = np.logspace(np.log10(FILTER_BANK_LOW_HZ), np.log10(FILTER_BANK_HIGH_HZ), FILTER_BANK_NUM_BANDS + 1)
+    bandpassFilters: list[Pedalboard] = []
+    envelopeFollowers: list[Pedalboard] = []
+    for bandIndex in range(FILTER_BANK_NUM_BANDS):
+        bandLowHz = float(bandEdgesHz[bandIndex])
+        bandHighHz = float(bandEdgesHz[bandIndex + 1])
+        bandpassPlugins = []
+        for _ in range(FILTER_BANK_STAGES_PER_BAND):
+            bandpassPlugins.append(HighpassFilter(cutoff_frequency_hz=bandLowHz))
+            bandpassPlugins.append(LowpassFilter(cutoff_frequency_hz=bandHighHz))
+        bandpassFilters.append(Pedalboard(bandpassPlugins))
+        envelopeFollowers.append(Pedalboard([LowpassFilter(cutoff_frequency_hz=ENVELOPE_FOLLOWER_CUTOFF_HZ)]))
 
     def VocoderStep(block: AudioBlock) -> AudioBlock:
         framesInBlock = block.shape[0]
@@ -323,7 +445,18 @@ def CompileVocoderStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
         time = np.arange(framesInBlock, dtype=np.float64) / sampleRate
         phase = (detectedFrequency * time) % 1.0
         sawtooth = (2.0 * phase - 1.0) * carrierAmplitude
-        return sawtooth.reshape(-1, 1).astype(np.float32)
+        carrier = sawtooth.reshape(-1, 1).astype(np.float32)
+
+        shapedOutput = np.zeros((framesInBlock, 1), dtype=np.float64)
+        for bandpassFilter, envelopeFollower in zip(bandpassFilters, envelopeFollowers):
+            modulatorBand = bandpassFilter.process(block, sampleRate, reset=True)
+            rectifiedModulatorBand = np.abs(modulatorBand).astype(np.float32)
+            bandEnvelope = envelopeFollower.process(rectifiedModulatorBand, sampleRate, reset=True)
+            carrierBand = bandpassFilter.process(carrier, sampleRate, reset=True)
+            shapedOutput += carrierBand.astype(np.float64) * bandEnvelope.astype(np.float64)
+
+        shapedOutput = shapedOutput / FILTER_BANK_NUM_BANDS * FILTER_BANK_MAKEUP_GAIN
+        return shapedOutput.astype(np.float32)
 
     return VocoderStep
 

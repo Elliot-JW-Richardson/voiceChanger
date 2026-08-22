@@ -478,7 +478,7 @@
 
 **Completion promise:** `SLICE_34_DONE`
 **Depends on:** Slice 33
-**Status:** todo
+**Status:** done
 
 ## Slice 35 — Vocoder switches to a noise carrier for unvoiced input  _(Component: Vocoder)_
 
