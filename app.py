@@ -5,8 +5,8 @@ import sounddevice as sd
 from flask import Flask, Response, jsonify, send_from_directory, request
 
 from voice_engine.bank import LoadVoiceBank
-from voice_engine.engine import ApplyMasterVolume, AudioBlock, CompiledChainCache, ProcessChain
-from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder
+from voice_engine.engine import ApplyMasterVolume, ApplyNoiseGate, AudioBlock, CompiledChainCache, ProcessChain
+from voice_engine.runtime import ActiveVoiceHolder, MasterVolumeHolder, NoiseGateHolder
 
 app = Flask(__name__)
 
@@ -45,6 +45,7 @@ VOICES_DIRECTORY_PATH = Path(__file__).parent / "voices"
 VOICE_BANK = LoadVoiceBank(str(VOICES_DIRECTORY_PATH))
 ACTIVE_VOICE_HOLDER = ActiveVoiceHolder(VOICE_BANK)
 MASTER_VOLUME_HOLDER = MasterVolumeHolder()
+NOISE_GATE_HOLDER = NoiseGateHolder()
 COMPILED_CHAIN_CACHE = CompiledChainCache(SAMPLE_RATE)
 
 AUDIO_STREAM: Optional[sd.Stream] = None  # global handle to the stream
@@ -60,9 +61,16 @@ def AudioCallback(indata: AudioBlock, outdata: AudioBlock, frames: int, time: An
     # chain fresh on every block was expensive enough to cause audible
     # underflow/overflow once pitch shift landed -- COMPILED_CHAIN_CACHE
     # only recompiles when the active Voice actually changes.
+    # Noise Gate (see CONTEXT.md) is a single global control applied to
+    # the raw microphone input BEFORE the Voice's Effect Step chain runs
+    # -- the mirror image of Master Volume below, which applies AFTER.
+    # Not a Voice, not an Effect Step, so it's applied here rather than
+    # folded into COMPILED_CHAIN_CACHE/ProcessChain.
+    noiseGateLevel = NOISE_GATE_HOLDER.Get()
+    gatedInput = ApplyNoiseGate(indata, noiseGateLevel, SAMPLE_RATE)
     activeVoice = ACTIVE_VOICE_HOLDER.Get()
     compiledChain = COMPILED_CHAIN_CACHE.Get(activeVoice)
-    processedBlock = ProcessChain(compiledChain, indata)
+    processedBlock = ProcessChain(compiledChain, gatedInput)
     # Master Volume (see CONTEXT.md) is a single global gain applied
     # AFTER the Voice's Effect Step chain, independent of which Voice is
     # active -- not a Voice, not an Effect Step, so it's applied here

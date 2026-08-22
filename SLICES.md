@@ -382,7 +382,7 @@
 
 **Completion promise:** `SLICE_27_DONE`
 **Depends on:** Slice 26, Slice 6
-**Status:** todo
+**Status:** done
 
 ## Slice 28 — Get current noise gate level  _(Component: Noise Gate API)_
 

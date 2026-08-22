@@ -32,7 +32,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, Pedalboard, PitchShift, Reverb
+from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, NoiseGate, Pedalboard, PitchShift, Reverb
 
 from voice_engine.voice import EffectStep, Voice
 
@@ -352,6 +352,72 @@ def ApplyMasterVolume(block: AudioBlock, level: int, sampleRate: int) -> AudioBl
     board = Pedalboard([Gain(gain_db=gainDb), Limiter(threshold_db=-1.0, release_ms=100.0)])
     limitedBlock = board.process(block, sampleRate, reset=True)
     return limitedBlock.astype(np.float32)
+
+
+def ApplyNoiseGate(block: AudioBlock, level: int, sampleRate: int) -> AudioBlock:
+    """Attenuate a block of audio below a threshold using
+    `pedalboard.NoiseGate` (see CONTEXT.md's Noise Gate entry), applied
+    to the raw microphone input BEFORE a Voice's Effect Step chain runs
+    -- the mirror image of `ApplyMasterVolume`, which applies gain AFTER
+    the chain.
+
+    level: a sensitivity percentage, 0-100 (0 = gate fully open, no
+        gating), as tracked by `voice_engine.runtime.NoiseGateHolder`.
+
+    Deliberately separate from the Effect Step chain machinery above --
+    like Master Volume, the Noise Gate is a single global control
+    independent of which Voice is active; it is not itself an Effect
+    Step and has no entry in `CompileChain`'s dispatch.
+
+    LEVEL -> THRESHOLD_DB MAPPING: there's no single obviously-correct
+    formula the way Master Volume's `20*log10(level/100)` gain
+    conversion is exact, since "sensitivity" has no natural dB unit of
+    its own. `threshold_db` is linearly mapped across a -60dB (very
+    permissive -- only near-silence gets gated) to -20dB (aggressive --
+    gates a fair amount of quiet signal) range: `threshold_db = -60 +
+    (level / 100) * 40`. Confirmed via scratch experiments (see this
+    slice's test docstring) that this range reliably gates a
+    ~0.01-amplitude noise-like block down to near silence at level=80,
+    while leaving a ~0.5-amplitude voice-like tone essentially
+    untouched. `ratio=10` (pedalboard's own default) is a firm but not
+    brick-wall gate; `attack_ms=1.0` (short, so the gate reacts within a
+    single ~139ms block at this project's SAMPLE_RATE=22050/
+    BLOCKSIZE=3072 -- see the "reset=True" note below) and
+    `release_ms=50.0` (short enough to recover quickly once level rises
+    above threshold, matching the "voice through largely unaffected"
+    acceptance criteria).
+
+    `.process()` is called with the default `reset=True`, same rationale
+    as every other Effect Step in this file: it guarantees the output is
+    always the SAME LENGTH as the input block, a hard requirement of
+    this project's fixed-block-size `outdata[:] = ...` contract. Like
+    Master Volume, this means the gate's envelope follower does not
+    carry state across block boundaries in the live callback -- the
+    short attack/release times above are chosen specifically so the gate
+    can still act meaningfully within ONE block despite that, the same
+    limitation `CompilePitchShiftStep`/`CompileReverbStep` already
+    document for their own effects.
+
+    Constructing `Pedalboard([NoiseGate])` fresh on every call is fine
+    here, following `ApplyMasterVolume`'s own documented precedent:
+    `level` can change on any call (the user can drag the Noise Gate
+    slider at any time), so there is no fixed instance to cache the way
+    `CompiledChainCache` caches a compiled Voice chain.
+
+    `level <= 0` (the default, "gate fully open") bypasses NoiseGate
+    entirely and returns `block` unchanged -- without this, even a
+    maximally permissive threshold could still act on a near-silent
+    block, which would break the Passthrough Voice's guarantee of being
+    a truly unmodified mic-to-speaker signal at default settings (see
+    CONTEXT.md's Passthrough Voice entry and tests/test_app.py).
+    """
+    if level <= 0:
+        return block
+
+    thresholdDb = -60.0 + (level / 100.0) * 40.0
+    board = Pedalboard([NoiseGate(threshold_db=thresholdDb, ratio=10, attack_ms=1.0, release_ms=50.0)])
+    gatedBlock = board.process(block, sampleRate, reset=True)
+    return gatedBlock.astype(np.float32)
 
 
 def ProcessChain(steps: list[CompiledEffectStep], block: AudioBlock) -> AudioBlock:
