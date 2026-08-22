@@ -6,7 +6,7 @@ Currently only the **Passthrough** Voice (no effects) is shipped — see [SLICES
 
 ## Prerequisites
 
-- Python 3.9
+- Python 3.14
 - Windows (the existing venv and setup are Windows-oriented; a working microphone/speaker setup is required to actually hear anything)
 
 ## Setup

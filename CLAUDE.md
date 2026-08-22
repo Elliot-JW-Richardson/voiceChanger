@@ -10,7 +10,7 @@ The old pitch slider and its `/update_pitch` endpoint have been retired entirely
 
 ## Environment
 
-- Python 3.9 (venv at `venv/`, based on `C:\Python39`)
+- Python 3.14 (venv at `venv/`, based on `C:\Python314`)
 - Dependencies pinned in `requirements.txt`: `flask`, `sounddevice`, `numpy`, `pyyaml`, `pytest`
 - Windows-only paths/tooling assumed by the existing venv
 - See [README.md](README.md) for setup/run instructions aimed at a human running this project (this file is aimed at Claude Code specifically)
