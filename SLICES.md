@@ -408,7 +408,7 @@
 
 **Completion promise:** `SLICE_29_DONE`
 **Depends on:** Slice 28
-**Status:** todo
+**Status:** done
 
 ## Slice 30 — Set noise gate level  _(Component: Noise Gate API)_
 

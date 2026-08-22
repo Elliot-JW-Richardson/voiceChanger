@@ -33,6 +33,11 @@
         <input type="range" id="volumeSlider" min="0" max="400" value="100">
     </div>
 
+    <div id="noiseGateControl">
+        <label for="noiseGateSlider">Noise Gate</label>
+        <input type="range" id="noiseGateSlider" min="0" max="100" value="0">
+    </div>
+
     <script>
         document.addEventListener("DOMContentLoaded", () => {
 
@@ -95,10 +100,17 @@
                 });
             });
 
+            async function renderNoiseGateSlider() {
+                const res = await fetch('/noise_gate');
+                const data = await res.json();
+                document.getElementById('noiseGateSlider').value = data.level;
+            }
+
             // Initial status
             refreshStatus();
             renderVoiceList();
             renderVolumeSlider();
+            renderNoiseGateSlider();
 
         });
     </script>
