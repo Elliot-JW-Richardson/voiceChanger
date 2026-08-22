@@ -1,0 +1,49 @@
+id: magos_gain
+name: "TEST: Magos + Gain (no distortion)"
+default: false
+test: true
+# A/B TEST VOICE -- real-hardware measurement (comparing recordings of
+# the retuned Magos, its distortion variants, and reference audio, all
+# of the same spoken content) found the single biggest gap between
+# Magos and the reference target was LOUDNESS, not spectral shape: the
+# reference measured ~12x Magos's own RMS level. Distortion at a
+# moderate drive level happened to land almost exactly on the
+# reference's loudness by coincidence, which likely explains much of
+# why it sounded better -- independent of its real downsides (noise-
+# floor amplification, pitch-instability; see
+# voice_engine/engine.py's CompileDistortionStep docstring and git
+# history).
+#
+# This tests the same loudness target WITHOUT waveshaping: same base
+# Magos chain (pitch_shift, ring_mod, bitcrush, eq), then a plain
+# `gain` step instead of `distortion`. A first estimate (17dB, from
+# base Magos's measured RMS ~0.0267 vs the reference's ~0.1845) UNDERSHOT
+# once the limiter was in the loop -- once gain pushes peaks to the
+# limiter's ceiling, more RAW gain doesn't scale RMS linearly anymore
+# (the limiter is doing real compression work, not just occasionally
+# clipping a peak). Re-measured empirically against real voice input,
+# processed block-by-block exactly like the live app: gain_db=32 lands
+# RMS at ~0.1848, matching the reference's ~0.1845 almost exactly.
+# Re-tune by ear/re-measure if the reference target numbers change.
+#
+# `limiter` is REQUIRED here, same reasoning as the distortion variants
+# (see CompileGainStep's docstring) -- 17dB of linear gain on real voice
+# input pushes peaks well past [-1.0, 1.0] (confirmed via testing: naive
+# gain alone pushed a real Magos recording's peak to ~4x full scale),
+# and this does NOT get caught by Master Volume's own limiter, which is
+# bypassed entirely at the default 100% level.
+chain:
+  - type: pitch_shift
+    semitones: -14
+  - type: ring_mod
+    frequency: 54
+  - type: bitcrush
+    bit_depth: 10
+  - type: eq
+    band: high
+    cutoff_frequency_hz: 2500
+    gain_db: 6
+  - type: gain
+    gain_db: 32
+  - type: limiter
+    threshold_db: -1.0

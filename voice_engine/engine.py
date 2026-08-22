@@ -218,6 +218,50 @@ def CompileDistortionStep(step: EffectStep, sampleRate: int) -> CompiledEffectSt
     return DistortionStep
 
 
+def CompileGainStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `gain` Effect Step into a callable that runs a block
+    through `pedalboard.Gain` -- a plain linear level boost, with NO
+    waveshaping/nonlinearity (unlike `distortion`, see
+    `CompileDistortionStep` above).
+
+    WHY THIS EXISTS: real-hardware measurement (comparing recordings of
+    the retuned Magos, its distortion variants, and reference audio, all
+    of the same spoken content) found the single biggest measured
+    difference between the plain retuned Magos and the reference target
+    wasn't spectral shape -- it was LOUDNESS. The reference measured
+    roughly 12x the RMS level of Magos's own output (a real, close-to-
+    inaudible gap, not a subjective impression), while `distortion` at a
+    drive level the user preferred happened to land almost exactly on
+    the reference's RMS by coincidence -- likely explaining much of why
+    it sounded better, independent of its measured richness or its real
+    downsides (noise-floor amplification, pitch-instability -- see
+    `CompileDistortionStep`'s docstring and git history). This step lets
+    a Voice reach for that same loudness directly, without the
+    waveshaping side effects.
+
+    `step.params["gain_db"]` matches `pedalboard.Gain`'s own constructor
+    parameter.
+
+    CLIPPING WARNING -- same as `distortion` (see
+    `CompileDistortionStep`'s docstring): a `gain_db` large enough to
+    meaningfully close a ~12x loudness gap WILL push real voice input's
+    peaks well past [-1.0, 1.0] (confirmed via testing: naive gain alone
+    pushed a real recording's peak to ~4x full scale). Follow this step
+    with a `limiter` Effect Step (see `CompileLimiterStep` below) --
+    not optional, for the same reasons `distortion` needs one, and NOT
+    caught by `ApplyMasterVolume`'s own Limiter downstream, which is
+    bypassed entirely at the default 100% Master Volume level.
+    """
+    gainDb = step.params["gain_db"]
+    pedalboardChain = Pedalboard([Gain(gain_db=gainDb)])
+
+    def GainStep(block: AudioBlock) -> AudioBlock:
+        gainedBlock = pedalboardChain.process(block, sampleRate, reset=True)
+        return gainedBlock.astype(np.float32)
+
+    return GainStep
+
+
 def CompileLimiterStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     """Compile a `limiter` Effect Step into a callable that runs a block
     through `pedalboard.Limiter`, hard-bounding it to [-1.0, 1.0].
@@ -622,12 +666,15 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
     palette (see CONTEXT.md). `vocoder` (Slice 33) is a further, distinct
     Effect Step type layered on top of that palette (see CONTEXT.md's
     "Vocoder Effect Step (v2, scoped -- see ADR 0004)" entry), not one of
-    the original five palette entries itself. `distortion` and `limiter`
-    (added post-ADR-0005, see `CompileDistortionStep`/`CompileLimiterStep`
-    above) are a further pair: waveshaping distortion for real harmonic
-    richness real-hardware testing found `ring_mod`/`bitcrush` alone
-    couldn't provide, and an explicit safety valve for the headroom it
-    can cost. Any other type raises `NotImplementedError`.
+    the original five palette entries itself. `distortion`, `gain`, and
+    `limiter` (added post-ADR-0005, see `CompileDistortionStep`/
+    `CompileGainStep`/`CompileLimiterStep` above) are a further group:
+    waveshaping distortion for harmonic richness, plain linear gain for
+    loudness alone (real-hardware measurement found loudness, not
+    spectral shape, was the biggest gap between Magos and reference
+    audio -- see `CompileGainStep`'s docstring), and an explicit safety
+    valve for the headroom either one can cost. Any other type raises
+    `NotImplementedError`.
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
@@ -645,6 +692,8 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompileVocoderStep(step, sampleRate))
         elif step.type == "distortion":
             compiledSteps.append(CompileDistortionStep(step, sampleRate))
+        elif step.type == "gain":
+            compiledSteps.append(CompileGainStep(step, sampleRate))
         elif step.type == "limiter":
             compiledSteps.append(CompileLimiterStep(step, sampleRate))
         else:
