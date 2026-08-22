@@ -140,3 +140,108 @@ def test_VocoderStepOutputHasRichHarmonicStructureUnlikeInputSine() -> None:
     # sawtooth carries a genuine, much stronger harmonic there. Checked
     # as a clear order-of-magnitude threshold (>10x), not an exact ratio.
     assert outputSecondHarmonicEnergy > inputSecondHarmonicEnergy * 10.0
+
+
+def MakeTwoToneBlock(fundamentalHz: float, harmonicHz: float, harmonicAmplitude: float) -> np.ndarray:
+    time = np.arange(BLOCKSIZE, dtype=np.float32) / SAMPLE_RATE
+    signal = np.sin(2 * np.pi * fundamentalHz * time) + harmonicAmplitude * np.sin(2 * np.pi * harmonicHz * time)
+    return signal.astype(np.float32).reshape(-1, 1)
+
+
+def EnergyInFrequencyRange(signal: np.ndarray, sampleRate: int, lowHz: float, highHz: float) -> float:
+    spectrum = np.fft.rfft(signal)
+    frequencyBins = np.fft.rfftfreq(len(signal), d=1.0 / sampleRate)
+    inRange = (frequencyBins >= lowHz) & (frequencyBins <= highHz)
+    return float(np.sum(np.abs(spectrum[inRange])))
+
+
+def test_VocoderStepShapesCarrierWithEachInputsOwnFormantEnvelope() -> None:
+    """Tests for Slice 34 (SLICES.md verification):
+
+    - Given a chain containing a vocoder Effect Step and two different
+      input signals that share the same pitch but differ in spectral/
+      formant shape
+    - When each is processed through it
+    - Then the two outputs differ from each other in spectral shape,
+      proving the carrier is shaped by each input's own envelope rather
+      than output as a flat sawtooth, while both retain the same
+      underlying pitch
+
+    TEST SIGNAL DESIGN: both inputs share the same fundamental (150Hz,
+    well inside DetectPitch's 50-500Hz search range) built from
+    `sin(2*pi*f0*t) + 0.5*sin(2*pi*harmonic*t)` -- a stand-in for
+    "differing formant shape" per the slice's TEST DESIGN GUIDANCE.
+    `signalEmphasizingLowHarmonic` adds its extra energy at the 3rd
+    harmonic (450Hz); `signalEmphasizingHighHarmonic` adds it at the 9th
+    harmonic (1350Hz), matching ADR 0004's "dense near-complete harmonic
+    series through at least the 9th harmonic" observation. A scratch
+    prototype (not committed) of this exact two-tone-then-vocode-then-FFT
+    chain at this sample rate/block size confirmed `DetectPitch` reports
+    150.0Hz for BOTH signals despite the added harmonic emphasis
+    (autocorrelation is robust to it, as expected) -- so both blocks are
+    genuinely exercising the SAME pitch, only differing in shape.
+
+    ASSERTIONS:
+    - Both outputs' FFT dominant frequency stays close to the shared
+      150Hz fundamental (and to each other) -- the carrier's underlying
+      pitch survives envelope shaping.
+    - Spectral-shape difference is checked via energy in two frequency
+      REGIONS chosen independently of this implementation's own internal
+      filter-bank band edges (a black-box check, per the slice's TEST
+      DESIGN GUIDANCE): a +/-50Hz window around each input's emphasized
+      harmonic. The same prototype found output-for-the-low-harmonic-
+      input carries ~1.56x MORE energy in the low-harmonic region than
+      output-for-the-high-harmonic-input does there, and output-for-the-
+      high-harmonic-input carries ~1.80x more energy in the high-harmonic
+      region than the other output does there -- checked below via a
+      1.2x margin, comfortably inside both observed ratios, not a guess.
+    """
+    fundamentalHz = 150.0
+    thirdHarmonicHz = 3 * fundamentalHz
+    ninthHarmonicHz = 9 * fundamentalHz
+    harmonicAmplitude = 0.5
+
+    signalEmphasizingLowHarmonic = MakeTwoToneBlock(fundamentalHz, thirdHarmonicHz, harmonicAmplitude)
+    signalEmphasizingHighHarmonic = MakeTwoToneBlock(fundamentalHz, ninthHarmonicHz, harmonicAmplitude)
+
+    pitchOfLowHarmonicSignal = DetectPitch(signalEmphasizingLowHarmonic, SAMPLE_RATE)
+    pitchOfHighHarmonicSignal = DetectPitch(signalEmphasizingHighHarmonic, SAMPLE_RATE)
+
+    # Both signals must genuinely share the same detected pitch --
+    # otherwise this test wouldn't isolate "differs in spectral shape"
+    # from "differs because the pitch differs".
+    assert pitchOfLowHarmonicSignal > 0.0
+    assert pitchOfHighHarmonicSignal > 0.0
+    assert abs(pitchOfLowHarmonicSignal - pitchOfHighHarmonicSignal) < 5.0
+
+    chain = [EffectStep(type="vocoder", params={})]
+
+    outputForLowHarmonicSignal = ProcessChain(CompileChain(chain, SAMPLE_RATE), signalEmphasizingLowHarmonic)
+    outputForHighHarmonicSignal = ProcessChain(CompileChain(chain, SAMPLE_RATE), signalEmphasizingHighHarmonic)
+
+    assert outputForLowHarmonicSignal.dtype == np.float32
+    assert outputForHighHarmonicSignal.dtype == np.float32
+    assert outputForLowHarmonicSignal.shape == signalEmphasizingLowHarmonic.shape
+    assert outputForHighHarmonicSignal.shape == signalEmphasizingHighHarmonic.shape
+
+    # Both outputs retain the same underlying pitch.
+    dominantOfLowHarmonicOutput = DominantFrequency(outputForLowHarmonicSignal[:, 0], SAMPLE_RATE)
+    dominantOfHighHarmonicOutput = DominantFrequency(outputForHighHarmonicSignal[:, 0], SAMPLE_RATE)
+    assert abs(dominantOfLowHarmonicOutput - fundamentalHz) < 10.0
+    assert abs(dominantOfHighHarmonicOutput - fundamentalHz) < 10.0
+    assert abs(dominantOfLowHarmonicOutput - dominantOfHighHarmonicOutput) < 10.0
+
+    # The two outputs differ in spectral shape: each carries relatively
+    # more energy around the harmonic ITS OWN input emphasized, proving
+    # the carrier was shaped by that input's own envelope rather than
+    # both outputs being an identical flat sawtooth.
+    lowHarmonicRegion = (thirdHarmonicHz - 50.0, thirdHarmonicHz + 50.0)
+    highHarmonicRegion = (ninthHarmonicHz - 50.0, ninthHarmonicHz + 50.0)
+
+    lowHarmonicRegionEnergyInLowOutput = EnergyInFrequencyRange(outputForLowHarmonicSignal[:, 0], SAMPLE_RATE, *lowHarmonicRegion)
+    lowHarmonicRegionEnergyInHighOutput = EnergyInFrequencyRange(outputForHighHarmonicSignal[:, 0], SAMPLE_RATE, *lowHarmonicRegion)
+    highHarmonicRegionEnergyInLowOutput = EnergyInFrequencyRange(outputForLowHarmonicSignal[:, 0], SAMPLE_RATE, *highHarmonicRegion)
+    highHarmonicRegionEnergyInHighOutput = EnergyInFrequencyRange(outputForHighHarmonicSignal[:, 0], SAMPLE_RATE, *highHarmonicRegion)
+
+    assert lowHarmonicRegionEnergyInLowOutput > lowHarmonicRegionEnergyInHighOutput * 1.2
+    assert highHarmonicRegionEnergyInHighOutput > highHarmonicRegionEnergyInLowOutput * 1.2
