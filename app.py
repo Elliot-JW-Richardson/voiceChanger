@@ -116,6 +116,17 @@ def SetVolume() -> Response:
 def GetNoiseGate() -> Response:
     return jsonify({"level": NOISE_GATE_HOLDER.Get()})
 
+@app.route("/noise_gate", methods=["POST"])
+def SetNoiseGate() -> Response:
+    requestedLevel = request.get_json()["level"]
+    # NoiseGateHolder itself does no range validation (mirrors
+    # MasterVolumeHolder's docstring in voice_engine/runtime.py) --
+    # clamping to the valid 0-100% range (see CONTEXT.md's Noise Gate
+    # entry) is this route's job.
+    clampedLevel = max(0, min(100, requestedLevel))
+    NOISE_GATE_HOLDER.Set(clampedLevel)
+    return jsonify({"status": "ok", "level": clampedLevel})
+
 @app.route("/start", methods=["POST"])
 def StartStream() -> Response:
     global AUDIO_STREAM

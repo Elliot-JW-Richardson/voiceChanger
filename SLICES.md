@@ -421,7 +421,7 @@
 
 **Completion promise:** `SLICE_30_DONE`
 **Depends on:** Slice 29, Slice 26
-**Status:** todo
+**Status:** done
 
 ## Slice 31 — Dragging the noise gate slider updates the level  _(Component: Noise Gate UI)_
 
