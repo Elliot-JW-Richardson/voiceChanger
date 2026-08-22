@@ -56,8 +56,12 @@ def test_ListVoicesIncludesTestFlag() -> None:
     response = client.get("/voices")
     body: Any = response.get_json()
 
-    # Every shipped Voice today is a finished (non-test) Voice -- this
-    # just confirms the field is present and correctly False, not that a
-    # test Voice exists (none currently ship, see CONTEXT.md).
-    for voice in body["voices"]:
-        assert voice["test"] is False
+    voicesById = {voice["id"]: voice for voice in body["voices"]}
+
+    # A known finished (non-test) Voice reports False...
+    assert voicesById["passthrough"]["test"] is False
+    # ...and a known diagnostic/WIP Voice reports True -- confirms the
+    # flag is actually wired through GET /voices, not just present and
+    # always False (see CONTEXT.md's "Diagnostic Voices" note for why
+    # test Voices exist at all).
+    assert voicesById["magos_distortion_moderate"]["test"] is True

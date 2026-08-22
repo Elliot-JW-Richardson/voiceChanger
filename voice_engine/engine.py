@@ -36,7 +36,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Bitcrush, Gain, HighpassFilter, HighShelfFilter, Limiter, LowpassFilter, LowShelfFilter, NoiseGate, Pedalboard, PitchShift, Reverb
+from pedalboard import Bitcrush, Distortion, Gain, HighpassFilter, HighShelfFilter, Limiter, LowpassFilter, LowShelfFilter, NoiseGate, Pedalboard, PitchShift, Reverb
 
 from voice_engine.pitch_tracker import DetectPitch
 from voice_engine.voice import EffectStep, Voice
@@ -157,6 +157,101 @@ def CompileBitcrushStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep
         return crushedBlock.astype(np.float32)
 
     return BitcrushStep
+
+
+def CompileDistortionStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `distortion` Effect Step into a callable that runs a
+    block through `pedalboard.Distortion` (waveshaping/saturation
+    distortion) -- a genuinely different grit source from `bitcrush`
+    (quantization) or `ring_mod` (multiplication): waveshaping generates
+    real NEW harmonic content through a nonlinear transfer function,
+    rather than redistributing or quantizing whatever harmonic content
+    the input already has.
+
+    WHY THIS EXISTS: added after real-hardware feedback that a re-tuned
+    Magos (see ADR 0005, voices/magos.yaml) sounded "much better... but
+    lacking richness." Direct FFT harmonic-series comparison against
+    reference audio confirmed this objectively: `ring_mod` alone only
+    redistributes the input voice's OWN existing harmonics around its
+    carrier frequency, and a natural voice's higher harmonics are
+    naturally weak -- so harmonics beyond the 2nd came out measurably
+    quieter than the reference's own measured profile. `bitcrush` at a
+    tame `bit_depth` (10, tuned for intelligibility, not grit) doesn't
+    add much either. `pedalboard.Distortion`'s waveshaping closed that
+    gap in testing (see git history for the prototyping numbers) far
+    more than either of those.
+
+    `step.params["drive_db"]` matches `pedalboard.Distortion`'s own
+    constructor parameter (default 25 in pedalboard itself, but this
+    project's real, quiet microphone input needs it pushed much harder
+    to have any real effect -- prototyping against real voice recordings
+    found meaningful harmonic enrichment only from roughly drive_db=30
+    upward; gentle values like 5-10dB barely changed the output at all
+    on this project's typically-quiet input).
+
+    CLIPPING WARNING -- READ BEFORE CHAINING THIS WITH OTHER STEPS: at
+    the drive levels that actually do anything on quiet real voice input,
+    this step's own output can already sit at or near full scale
+    ([-1.0, 1.0]). `pedalboard.Distortion`'s own waveshaping self-bounds
+    its OWN output, but any Effect Step placed AFTER this one that adds
+    further gain (e.g. `eq`'s shelf boost) can push the signal well
+    PAST [-1.0, 1.0] -- confirmed via testing to reach a peak of ~2.5 on
+    real voice input with a +6dB EQ boost chained after this step at a
+    high drive level. This does NOT get caught by `ApplyMasterVolume`'s
+    Limiter downstream in `AudioCallback`, because that's BYPASSED
+    entirely at the default 100% Master Volume level (see
+    `ApplyMasterVolume`'s own docstring) -- a Voice's chain must stay
+    safely bounded on its own. If a Voice chains `distortion` with any
+    step that can add further gain afterward, follow it with a
+    `limiter` Effect Step (see `CompileLimiterStep` below).
+
+    Follows the same construct-once, `reset=True`, no-cross-block-state
+    pattern as every other `pedalboard`-based Effect Step here.
+    """
+    driveDb = step.params["drive_db"]
+    pedalboardChain = Pedalboard([Distortion(drive_db=driveDb)])
+
+    def DistortionStep(block: AudioBlock) -> AudioBlock:
+        distortedBlock = pedalboardChain.process(block, sampleRate, reset=True)
+        return distortedBlock.astype(np.float32)
+
+    return DistortionStep
+
+
+def CompileLimiterStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `limiter` Effect Step into a callable that runs a block
+    through `pedalboard.Limiter`, hard-bounding it to [-1.0, 1.0].
+
+    WHY THIS EXISTS: `distortion` (see `CompileDistortionStep` above) at
+    the drive levels that actually enrich harmonics on quiet real voice
+    input can push a chain's output well past [-1.0, 1.0] once later
+    steps (e.g. `eq`'s shelf boost) add further gain on top -- and,
+    critically, that can NOT be caught by `ApplyMasterVolume`'s own
+    Limiter downstream, since that one is bypassed entirely at the
+    default 100% Master Volume level (see `ApplyMasterVolume`'s
+    docstring) to preserve the Passthrough Voice's exact-passthrough
+    guarantee. Any Voice chain that risks exceeding [-1.0, 1.0] on its
+    own needs to bound itself explicitly with this step, not rely on
+    Master Volume happening to be turned down.
+
+    `step.params["threshold_db"]`: matches `pedalboard.Limiter`'s own
+    constructor parameter; -1.0 (matching `ApplyMasterVolume`'s own
+    Limiter threshold, see `ApplyMasterVolume`'s docstring) is a
+    reasonable default if unspecified... but IS specified explicitly by
+    every Voice using this step below, not defaulted here, so a Voice's
+    YAML is self-documenting about exactly how much headroom it keeps.
+
+    Should typically be the LAST step in a chain that needs it, after
+    every other step that could add gain.
+    """
+    thresholdDb = step.params["threshold_db"]
+    pedalboardChain = Pedalboard([Limiter(threshold_db=thresholdDb)])
+
+    def LimiterStep(block: AudioBlock) -> AudioBlock:
+        limitedBlock = pedalboardChain.process(block, sampleRate, reset=True)
+        return limitedBlock.astype(np.float32)
+
+    return LimiterStep
 
 
 def CompileEqStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
@@ -527,8 +622,12 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
     palette (see CONTEXT.md). `vocoder` (Slice 33) is a further, distinct
     Effect Step type layered on top of that palette (see CONTEXT.md's
     "Vocoder Effect Step (v2, scoped -- see ADR 0004)" entry), not one of
-    the original five palette entries itself. Any other type raises
-    `NotImplementedError`.
+    the original five palette entries itself. `distortion` and `limiter`
+    (added post-ADR-0005, see `CompileDistortionStep`/`CompileLimiterStep`
+    above) are a further pair: waveshaping distortion for real harmonic
+    richness real-hardware testing found `ring_mod`/`bitcrush` alone
+    couldn't provide, and an explicit safety valve for the headroom it
+    can cost. Any other type raises `NotImplementedError`.
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
@@ -544,6 +643,10 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompileReverbStep(step, sampleRate))
         elif step.type == "vocoder":
             compiledSteps.append(CompileVocoderStep(step, sampleRate))
+        elif step.type == "distortion":
+            compiledSteps.append(CompileDistortionStep(step, sampleRate))
+        elif step.type == "limiter":
+            compiledSteps.append(CompileLimiterStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps
