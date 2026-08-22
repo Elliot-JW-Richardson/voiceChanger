@@ -13,9 +13,9 @@ the closures it builds for steps that need it. Slice 19 adds the second
 concrete type, ring modulation (a trivial custom oscillator multiply --
 `pedalboard` doesn't provide it). Slice 20 adds the third, distortion/
 bitcrush (via `pedalboard.Bitcrush`). Slice 23 adds the fourth, EQ (via
-`pedalboard.LowShelfFilter`/`HighShelfFilter`). The remaining palette
-type, reverb, arrives in a later slice (24) and still raises
-`NotImplementedError` until then.
+`pedalboard.LowShelfFilter`/`HighShelfFilter`). Slice 24 adds the fifth
+and final palette type, reverb (via `pedalboard.Reverb`), completing the
+Effect palette (see CONTEXT.md).
 
 IMPORTANT for anyone adding a new Effect Step type: any expensive setup
 (e.g. constructing a `pedalboard.Pedalboard`/plugin instance) MUST happen
@@ -32,7 +32,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, Pedalboard, PitchShift
+from pedalboard import Bitcrush, Gain, HighShelfFilter, Limiter, LowShelfFilter, Pedalboard, PitchShift, Reverb
 
 from voice_engine.voice import EffectStep, Voice
 
@@ -202,6 +202,52 @@ def CompileEqStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
     return EqStep
 
 
+def CompileReverbStep(step: EffectStep, sampleRate: int) -> CompiledEffectStep:
+    """Compile a `reverb` Effect Step into a callable that runs a block
+    through `pedalboard.Reverb` (see CONTEXT.md's Effect palette entry:
+    "reverb"), the fifth and final Effect palette type.
+
+    Follows the exact same pattern as `CompilePitchShiftStep`/
+    `CompileBitcrushStep`/`CompileEqStep`: the `Pedalboard`/`Reverb`
+    instance is constructed ONCE here, at compile time, and reused for
+    every subsequent block via the closure -- constructing it per-block
+    would be expensive setup work happening on the real-time audio
+    callback thread, the bug class this project's "Real-time
+    performance" notes (CLAUDE.md) warn against.
+
+    `step.params["wet_level"]` and `step.params["room_size"]` map
+    directly onto `pedalboard.Reverb`'s constructor parameters of the
+    same names (`wet_level` controls how much of the reverberated signal
+    is mixed into the output; `room_size` controls decay length/
+    character); `damping`, `dry_level`, `width`, and `freeze_mode` are
+    left at pedalboard's own defaults (no Voice has needed to tune them
+    yet).
+
+    `.process()` is called with the default `reset=True`, same rationale
+    as the other Effect Steps: it guarantees the output is always the
+    SAME LENGTH as the input block, a hard requirement of this project's
+    fixed-block-size `outdata[:] = ...` contract. Unlike bitcrush/EQ,
+    reverb DOES have meaningful cross-block state (the decay tail) --
+    `reset=True` means that tail is cut off/reset at each block boundary
+    in the live callback rather than carrying into the next block, the
+    same accepted limitation `CompilePitchShiftStep`'s docstring already
+    documents for pitch shift (see CLAUDE.md's Real-time performance
+    point 3). This is fine for this slice's acceptance criteria, which
+    only requires a decay tail extending beyond the impulse's position
+    WITHIN one `process()` call, not across the live callback's block
+    boundaries.
+    """
+    wetLevel = step.params["wet_level"]
+    roomSize = step.params["room_size"]
+    pedalboardChain = Pedalboard([Reverb(wet_level=wetLevel, room_size=roomSize)])
+
+    def ReverbStep(block: AudioBlock) -> AudioBlock:
+        reverbedBlock = pedalboardChain.process(block, sampleRate, reset=True)
+        return reverbedBlock.astype(np.float32)
+
+    return ReverbStep
+
+
 def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffectStep]:
     """Compile a Voice's declarative Effect Step chain into the callable
     form `ProcessChain` expects.
@@ -210,9 +256,10 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
         Step types (e.g. pitch shift) whose underlying DSP depends on it.
 
     Dispatches by each step's `type`; `pitch_shift` (Slice 11), `ring_mod`
-    (Slice 19), `bitcrush` (Slice 20), and `eq` (Slice 23) are the
-    concrete types handled so far. Any other type raises
-    `NotImplementedError` -- reverb arrives in a later slice (24).
+    (Slice 19), `bitcrush` (Slice 20), `eq` (Slice 23), and `reverb`
+    (Slice 24) are the concrete types handled so far -- the full Effect
+    palette (see CONTEXT.md). Any other type raises
+    `NotImplementedError`.
     """
     compiledSteps: list[CompiledEffectStep] = []
     for step in chain:
@@ -224,6 +271,8 @@ def CompileChain(chain: list[EffectStep], sampleRate: int) -> list[CompiledEffec
             compiledSteps.append(CompileBitcrushStep(step, sampleRate))
         elif step.type == "eq":
             compiledSteps.append(CompileEqStep(step, sampleRate))
+        elif step.type == "reverb":
+            compiledSteps.append(CompileReverbStep(step, sampleRate))
         else:
             raise NotImplementedError(f"Unknown Effect Step type: {step.type}")
     return compiledSteps

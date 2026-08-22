@@ -338,7 +338,7 @@
 
 **Completion promise:** `SLICE_24_DONE`
 **Depends on:** Slice 1
-**Status:** todo
+**Status:** done
 
 ## Slice 25 — Radio Operator Voice  _(Component: Voice Bank)_
 
