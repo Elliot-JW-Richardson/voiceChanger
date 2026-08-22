@@ -245,3 +245,91 @@ def test_VocoderStepShapesCarrierWithEachInputsOwnFormantEnvelope() -> None:
 
     assert lowHarmonicRegionEnergyInLowOutput > lowHarmonicRegionEnergyInHighOutput * 1.2
     assert highHarmonicRegionEnergyInHighOutput > highHarmonicRegionEnergyInLowOutput * 1.2
+
+
+def MakeNoiseBlock(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return rng.uniform(-1.0, 1.0, size=(BLOCKSIZE, 1)).astype(np.float32)
+
+
+def PeakToAverageRatio(signal: np.ndarray) -> float:
+    spectrum = np.abs(np.fft.rfft(signal))
+    return float(np.max(spectrum) / np.mean(spectrum))
+
+
+def test_VocoderStepUsesNoiseCarrierForUnvoicedInputButSawtoothForPitchedInput() -> None:
+    """Tests for Slice 35 (SLICES.md verification):
+
+    - Given a chain containing a vocoder Effect Step and an input block
+      that is noise-like with no clear pitch
+    - When it is processed through it
+    - Then the output is noise-carrier-based rather than a tonal sawtooth
+      at some spuriously detected pitch, while a separate clearly-pitched
+      block in the same test still produces the pitched sawtooth carrier
+      as before
+
+    TEST SIGNAL DESIGN: the noise-like block is
+    `np.random.default_rng(42).uniform(-1.0, 1.0, size=(BLOCKSIZE, 1))`
+    -- genuine white noise, no periodicity for autocorrelation to lock
+    onto. A scratch prototype (not committed) confirmed `DetectPitch`
+    reports exactly 0.0 for this seed and 19 others tried (0-19), so this
+    reliably exercises the unvoiced path rather than occasionally landing
+    on a spurious weak peak. The pitched block reuses `MakeSineBlock`
+    (150Hz), the same style Slices 33/34's tests above already use.
+
+    SPECTRAL METRIC -- PEAK-TO-AVERAGE RATIO: `PeakToAverageRatio`
+    computes the FFT magnitude spectrum's max bin divided by its mean
+    bin -- a sharp, single-frequency tone (like a sawtooth's fundamental)
+    concentrates most of its energy in one bin, giving a very high
+    ratio; broadband noise spreads energy roughly evenly across bins,
+    giving a low ratio close to 1. The same scratch prototype (running
+    this exact noise block and a 150Hz/300Hz sawtooth-carrier block
+    through this slice's own filter-bank shaping loop) found peak/average
+    ratios of ~5-6 for the noise-carrier-shaped output across 3 different
+    seeds, versus ~260-273 for the sawtooth-carrier-shaped output -- a
+    ~45x gap. The thresholds below (<50 for noise, >100 for pitched) sit
+    with wide, non-flaky margin on either side of that gap, not tuned to
+    a hairline.
+
+    NOT SILENCE: the same prototype found the noise-carrier-shaped
+    output's RMS around ~0.06 -- well above a small floor -- confirming
+    this slice's behavior (a shaped noise carrier) is genuinely different
+    from the OLD `np.zeros_like(block)` fallback it replaces (which would
+    have RMS exactly 0.0).
+    """
+    noiseBlock = MakeNoiseBlock(42)
+    assert DetectPitch(noiseBlock, SAMPLE_RATE) == 0.0
+
+    pitchedBlock = MakeSineBlock(150.0)
+    groundTruthPitch = DetectPitch(pitchedBlock, SAMPLE_RATE)
+    assert groundTruthPitch > 0.0
+
+    chain = [EffectStep(type="vocoder", params={})]
+    compiledChain = CompileChain(chain, SAMPLE_RATE)
+
+    noiseOutput = ProcessChain(compiledChain, noiseBlock)
+    pitchedOutput = ProcessChain(compiledChain, pitchedBlock)
+
+    assert noiseOutput.dtype == np.float32
+    assert noiseOutput.shape == noiseBlock.shape
+    assert pitchedOutput.dtype == np.float32
+    assert pitchedOutput.shape == pitchedBlock.shape
+
+    # Noise-like input's output is NOT silence/near-zero -- distinguishing
+    # this slice's noise-carrier behavior from the OLD np.zeros_like
+    # fallback it replaces.
+    noiseOutputRms = float(np.sqrt(np.mean(noiseOutput.astype(np.float64) ** 2)))
+    assert noiseOutputRms > 0.01
+
+    # Noise-like input's output lacks a single sharp dominant peak the way
+    # a tonal sawtooth would -- it's broadband/noise-carrier-based.
+    noiseOutputPeakToAverage = PeakToAverageRatio(noiseOutput[:, 0])
+    assert noiseOutputPeakToAverage < 50.0
+
+    # The separate, clearly-pitched block still produces a tonal sawtooth
+    # carrier as before: a sharp dominant peak close to its own detected
+    # input pitch.
+    pitchedOutputPeakToAverage = PeakToAverageRatio(pitchedOutput[:, 0])
+    assert pitchedOutputPeakToAverage > 100.0
+    pitchedOutputDominantFrequency = DominantFrequency(pitchedOutput[:, 0], SAMPLE_RATE)
+    assert abs(pitchedOutputDominantFrequency - groundTruthPitch) < 10.0
